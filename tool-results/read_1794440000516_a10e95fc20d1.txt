@@ -1,0 +1,1588 @@
+     1→"use client";
+     2→
+     3→// Smart Order Builder — a four-step request flow in one page: items (with
+     4→// per-line specifications, notes and attachment references, plus custom
+     5→// product requests), delivery, reference details, then a full review.
+     6→// Copy is honest throughout: this is a REQUEST that Jeffery Group reviews
+     7→// and confirms. Drafts can be saved and resumed at any step before that.
+     8→
+     9→import { Fragment, useMemo, useState } from "react";
+    10→import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+    11→import { motion, useReducedMotion } from "framer-motion";
+    12→import {
+    13→  ArrowLeft,
+    14→  ArrowRight,
+    15→  Check,
+    16→  ChevronRight,
+    17→  Loader2,
+    18→  Package,
+    19→  Save,
+    20→  ShoppingCart,
+    21→  SlidersHorizontal,
+    22→  Trash2,
+    23→  Truck,
+    24→} from "lucide-react";
+    25→import { Button } from "@/components/ui/button";
+    26→import { Input } from "@/components/ui/input";
+    27→import { Label } from "@/components/ui/label";
+    28→import { Textarea } from "@/components/ui/textarea";
+    29→import { Separator } from "@/components/ui/separator";
+    30→import { Skeleton } from "@/components/ui/skeleton";
+    31→import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+    32→import {
+    33→  Select,
+    34→  SelectContent,
+    35→  SelectItem,
+    36→  SelectTrigger,
+    37→  SelectValue,
+    38→} from "@/components/ui/select";
+    39→import {
+    40→  Dialog,
+    41→  DialogContent,
+    42→  DialogDescription,
+    43→  DialogFooter,
+    44→  DialogHeader,
+    45→  DialogTitle,
+    46→} from "@/components/ui/dialog";
+    47→import {
+    48→  AlertDialog,
+    49→  AlertDialogAction,
+    50→  AlertDialogCancel,
+    51→  AlertDialogContent,
+    52→  AlertDialogDescription,
+    53→  AlertDialogFooter,
+    54→  AlertDialogHeader,
+    55→  AlertDialogTitle,
+    56→} from "@/components/ui/alert-dialog";
+    57→import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+    58→import { PageHeader } from "@/components/shared/page-header";
+    59→import { Money, MoneyWithCode } from "@/components/shared/money";
+    60→import { ProductArtwork } from "@/components/shared/product-artwork";
+    61→import { EmptyState } from "@/components/shared/empty-state";
+    62→import { api } from "@/lib/api-client";
+    63→import { useAppStore, useCartStore } from "@/store/app-store";
+    64→import type {
+    65→  AddressDto,
+    66→  AttachmentMeta,
+    67→  LineSpecs,
+    68→  OrderDraftDto,
+    69→  OrderDraftPayload,
+    70→} from "@/types";
+    71→import { taxFromSubtotalCents } from "@/lib/money";
+    72→import { DEFAULT_TAX_RATE_BP } from "@/lib/constants";
+    73→import { formatDate } from "@/lib/date";
+    74→import { toast } from "@/hooks/use-toast";
+    75→import { cn } from "@/lib/utils";
+    76→import { Chip, ErrorAlert, Mono, QtyStepper, SectionCard } from "./portal-bits";
+    77→import {
+    78→  AttachmentChips,
+    79→  AttachmentPicker,
+    80→  CustomLineForm,
+    81→  DraftStrip,
+    82→  SpecChips,
+    83→  SpecFieldsEditor,
+    84→  cleanSpecs,
+    85→  newLocalId,
+    86→} from "./order-builder-bits";
+    87→
+    88→type LineExtras = { specs: LineSpecs; note: string; attachments: AttachmentMeta[] };
+    89→
+    90→const EMPTY_EXTRAS: LineExtras = { specs: {}, note: "", attachments: [] };
+    91→const EMPTY_ADDRESS_FORM = { label: "", line1: "", line2: "", city: "", province: "", postal: "" };
+    92→
+    93→const STEPS = [
+    94→  { n: 1, label: "Items" },
+    95→  { n: 2, label: "Delivery" },
+    96→  { n: 3, label: "Reference" },
+    97→  { n: 4, label: "Review" },
+    98→] as const;
+    99→
+   100→const EASE = [0.22, 1, 0.36, 1] as const;
+   101→
+   102→/** Numbered text-micro section label for the builder steps. */
+   103→function StepTitle({ n, children }: { n: number; children: string }) {
+   104→  return (
+   105→    <span className="flex items-baseline gap-2.5">
+   106→      <span className="tnum text-micro text-muted-foreground">{n}</span>
+   107→      <span>{children}</span>
+   108→    </span>
+   109→  );
+   110→}
+   111→
+   112→export function CartView() {
+   113→  const navigate = useAppStore((s) => s.navigate);
+   114→  const lines = useCartStore((s) => s.lines);
+   115→  const setQty = useCartStore((s) => s.setQty);
+   116→  const removeLine = useCartStore((s) => s.removeLine);
+   117→  const clear = useCartStore((s) => s.clear);
+   118→  const loadDraft = useCartStore((s) => s.loadDraft);
+   119→  const reduce = useReducedMotion();
+   120→  const enter = {
+   121→    initial: { opacity: 0, y: reduce ? 0 : 8 },
+   122→    animate: { opacity: 1, y: 0 },
+   123→    transition: { duration: 0.22, ease: EASE },
+   124→  };
+   125→
+   126→  const queryClient = useQueryClient();
+   127→  const [step, setStep] = useState(1);
+   128→  const [addressId, setAddressId] = useState("");
+   129→  const [orderNotes, setOrderNotes] = useState("");
+   130→  const [requestedDeliveryDate, setRequestedDeliveryDate] = useState("");
+   131→  const [poNumber, setPoNumber] = useState("");
+   132→  const [specialInstructions, setSpecialInstructions] = useState("");
+   133→  const [submitError, setSubmitError] = useState<string | null>(null);
+   134→
+   135→  // Per-line builder state (specifications, notes, attachment references).
+   136→  const [extras, setExtras] = useState<Record<string, LineExtras>>({});
+   137→  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+   138→  const [customLines, setCustomLines] = useState<
+   139→    { localId: string; name: string; description: string; qty: number; note: string; specs: LineSpecs; attachments: AttachmentMeta[] }[]
+   140→  >([]);
+   141→  const [customFormOpen, setCustomFormOpen] = useState(false);
+   142→  const [orderAttachments, setOrderAttachments] = useState<AttachmentMeta[]>([]);
+   143→  const [draftId, setDraftId] = useState<string | null>(null);
+   144→
+   145→  // Dialogs.
+   146→  const [draftDialogOpen, setDraftDialogOpen] = useState(false);
+   147→  const [draftName, setDraftName] = useState("");
+   148→  const [draftError, setDraftError] = useState<string | null>(null);
+   149→  const [addressDialogOpen, setAddressDialogOpen] = useState(false);
+   150→  const [addressForm, setAddressForm] = useState(EMPTY_ADDRESS_FORM);
+   151→  const [addressFormError, setAddressFormError] = useState<string | null>(null);
+   152→  const [pendingDraft, setPendingDraft] = useState<OrderDraftDto | null>(null);
+   153→
+   154→  const { data: addressesData, isLoading: addressesLoading, error: addressesError } = useQuery({
+   155→    queryKey: ["customer-addresses"],
+   156→    queryFn: () => api.get<AddressDto[]>("/api/customer/addresses"),
+   157→  });
+   158→
+   159→  const { data: drafts } = useQuery({
+   160→    queryKey: ["customer-drafts"],
+   161→    queryFn: () => api.get<OrderDraftDto[]>("/api/customer/drafts"),
+   162→  });
+   163→
+   164→  const approvedAddresses = addressesData ?? [];
+   165→  const selectedAddress =
+   166→    approvedAddresses.find((a) => a.id === addressId) ??
+   167→    (addressId === "" ? (approvedAddresses.find((a) => a.isDefault) ?? approvedAddresses[0]) : undefined);
+   168→
+   169→  const subtotal = lines.reduce((sum, l) => sum + l.qty * l.unitPriceCents, 0);
+   170→  const tax = taxFromSubtotalCents(subtotal, DEFAULT_TAX_RATE_BP);
+   171→  const total = subtotal + tax;
+   172→  const validQtys = lines.every((l) => l.qty >= l.minOrderQty && l.qty % l.increment === 0);
+   173→  const totalLineCount = lines.length + customLines.length;
+   174→  const totalUnits = lines.reduce((s, l) => s + l.qty, 0) + customLines.reduce((s, c) => s + c.qty, 0);
+   175→
+   176→  function extrasFor(productId: string): LineExtras {
+   177→    return extras[productId] ?? EMPTY_EXTRAS;
+   178→  }
+   179→
+   180→  function patchExtras(productId: string, patch: Partial<LineExtras>) {
+   181→    setExtras((m) => ({ ...m, [productId]: { ...extrasFor(productId), ...patch } }));
+   182→  }
+   183→
+   184→  function hasLineExtras(ex: LineExtras): boolean {
+   185→    return Boolean(cleanSpecs(ex.specs)) || ex.note.trim() !== "" || ex.attachments.length > 0;
+   186→  }
+   187→
+   188→  function removeCatalogueLine(productId: string) {
+   189→    removeLine(productId);
+   190→    setExtras((m) => {
+   191→      const next = { ...m };
+   192→      delete next[productId];
+   193→      return next;
+   194→    });
+   195→    setExpanded((m) => {
+   196→      const next = { ...m };
+   197→      delete next[productId];
+   198→      return next;
+   199→    });
+   200→  }
+   201→
+   202→  function updateCustomQty(localId: string, qty: number) {
+   203→    setCustomLines((cs) => cs.map((c) => (c.localId === localId ? { ...c, qty } : c)));
+   204→  }
+   205→
+   206→  function removeCustomLine(localId: string) {
+   207→    setCustomLines((cs) => cs.filter((c) => c.localId !== localId));
+   208→  }
+   209→
+   210→  function defaultDraftName(): string {
+   211→    return `Draft — ${totalLineCount} item${totalLineCount === 1 ? "" : "s"}`;
+   212→  }
+   213→
+   214→  function buildDraftPayload(): OrderDraftPayload {
+   215→    return {
+   216→      lines: [
+   217→        ...lines.map((l) => {
+   218→          const ex = extrasFor(l.productId);
+   219→          return {
+   220→            productId: l.productId,
+   221→            sku: l.sku,
+   222→            name: l.name,
+   223→            qty: l.qty,
+   224→            unitPriceCents: l.unitPriceCents,
+   225→            minOrderQty: l.minOrderQty,
+   226→            increment: l.increment,
+   227→            casePack: l.casePack,
+   228→            unit: l.unit,
+   229→            note: ex.note.trim() || null,
+   230→            specs: cleanSpecs(ex.specs) ?? null,
+   231→            attachments: ex.attachments,
+   232→          };
+   233→        }),
+   234→        ...customLines.map((c) => ({
+   235→          productId: null,
+   236→          sku: "",
+   237→          name: c.name,
+   238→          qty: c.qty,
+   239→          unitPriceCents: null,
+   240→          minOrderQty: 1,
+   241→          increment: 1,
+   242→          casePack: 0,
+   243→          unit: "unit",
+   244→          customDescription: c.description || null,
+   245→          note: c.note || null,
+   246→          specs: cleanSpecs(c.specs) ?? null,
+   247→          attachments: c.attachments,
+   248→        })),
+   249→      ],
+   250→      delivery: {
+   251→        addressId: selectedAddress?.id ?? null,
+   252→        requestedDeliveryDate: requestedDeliveryDate || null,
+   253→        notes: orderNotes.trim() || null,
+   254→      },
+   255→      reference: {
+   256→        poNumber: poNumber.trim() || null,
+   257→        specialInstructions: specialInstructions.trim() || null,
+   258→      },
+   259→      attachments: orderAttachments,
+   260→    };
+   261→  }
+   262→
+   263→  function loadDraftInto(d: OrderDraftDto) {
+   264→    const payload = d.payload;
+   265→    const catalogueLines = payload.lines.filter((l): l is typeof l & { productId: string } => l.productId !== null);
+   266→    const customs = payload.lines.filter((l) => l.productId === null);
+   267→
+   268→    // Catalogue lines go back into the persisted cart store (extras stripped).
+   269→    loadDraft(
+   270→      catalogueLines.map((l) => ({
+   271→        productId: l.productId,
+   272→        sku: l.sku,
+   273→        name: l.name,
+   274→        qty: l.qty,
+   275→        unitPriceCents: l.unitPriceCents ?? 0,
+   276→        minOrderQty: l.minOrderQty,
+   277→        increment: l.increment,
+   278→        casePack: l.casePack,
+   279→        unit: l.unit,
+   280→      })),
+   281→    );
+   282→
+   283→    const nextExtras: Record<string, LineExtras> = {};
+   284→    for (const l of catalogueLines) {
+   285→      if (l.note || cleanSpecs(l.specs) || (l.attachments?.length ?? 0) > 0) {
+   286→        nextExtras[l.productId] = {
+   287→          specs: l.specs ?? {},
+   288→          note: l.note ?? "",
+   289→          attachments: l.attachments ?? [],
+   290→        };
+   291→      }
+   292→    }
+   293→    setExtras(nextExtras);
+   294→    setCustomLines(
+   295→      customs.map((c) => ({
+   296→        localId: newLocalId(),
+   297→        name: c.name,
+   298→        description: c.customDescription ?? "",
+   299→        qty: c.qty,
+   300→        note: c.note ?? "",
+   301→        specs: c.specs ?? {},
+   302→        attachments: c.attachments ?? [],
+   303→      })),
+   304→    );
+   305→    const approvedIds = new Set(approvedAddresses.map((a) => a.id));
+   306→    setAddressId(
+   307→      payload.delivery.addressId && approvedIds.has(payload.delivery.addressId)
+   308→        ? payload.delivery.addressId
+   309→        : "",
+   310→    );
+   311→    setOrderNotes(payload.delivery.notes ?? "");
+   312→    setRequestedDeliveryDate((payload.delivery.requestedDeliveryDate ?? "").slice(0, 10));
+   313→    setPoNumber(payload.reference.poNumber ?? "");
+   314→    setSpecialInstructions(payload.reference.specialInstructions ?? "");
+   315→    setOrderAttachments(payload.attachments ?? []);
+   316→    setDraftId(d.id);
+   317→    setCustomFormOpen(false);
+   318→    setSubmitError(null);
+   319→    setStep(1);
+   320→  }
+   321→
+   322→  function requestContinueDraft(d: OrderDraftDto) {
+   323→    if (lines.length > 0 || customLines.length > 0) {
+   324→      setPendingDraft(d);
+   325→      return;
+   326→    }
+   327→    loadDraftInto(d);
+   328→    toast({
+   329→      title: `Draft “${d.name}” loaded`,
+   330→      description: "Pick up where you left off — nothing is submitted until you review it.",
+   331→    });
+   332→  }
+   333→
+   334→  const newAddressMutation = useMutation({
+   335→    mutationFn: () =>
+   336→      api.post<AddressDto>("/api/customer/addresses", {
+   337→        label: addressForm.label.trim(),
+   338→        line1: addressForm.line1.trim(),
+   339→        line2: addressForm.line2.trim() || null,
+   340→        city: addressForm.city.trim(),
+   341→        province: addressForm.province.trim(),
+   342→        postal: addressForm.postal.trim(),
+   343→      }),
+   344→    onSuccess: (a) => {
+   345→      queryClient.invalidateQueries({ queryKey: ["customer-addresses"] });
+   346→      setAddressDialogOpen(false);
+   347→      setAddressForm(EMPTY_ADDRESS_FORM);
+   348→      setAddressFormError(null);
+   349→      // The new location is active immediately — select it for this order.
+   350→      setAddressId(a.id);
+   351→      toast({
+   352→        title: "Delivery address added",
+   353→        description: "It is saved and ready to use at checkout right away.",
+   354→      });
+   355→    },
+   356→    onError: (err) =>
+   357→      setAddressFormError(
+   358→        err instanceof Error ? err.message : "We could not add the address. Please try again.",
+   359→      ),
+   360→  });
+   361→
+   362→  const saveDraftMutation = useMutation({
+   363→    mutationFn: () => {
+   364→      const payload = buildDraftPayload();
+   365→      const name = draftName.trim() || defaultDraftName();
+   366→      if (draftId) {
+   367→        return api.patch<OrderDraftDto>(`/api/customer/drafts/${draftId}`, { name, payload });
+   368→      }
+   369→      return api.post<OrderDraftDto>("/api/customer/drafts", { name, payload });
+   370→    },
+   371→    onSuccess: (saved) => {
+   372→      queryClient.invalidateQueries({ queryKey: ["customer-drafts"] });
+   373→      setDraftId(saved.id);
+   374→      setDraftDialogOpen(false);
+   375→      setDraftError(null);
+   376→      toast({
+   377→        title: "Draft saved",
+   378→        description: "Find it under “Saved drafts” above whenever you're ready to continue.",
+   379→      });
+   380→    },
+   381→    onError: (err) =>
+   382→      setDraftError(
+   383→        err instanceof Error ? err.message : "We could not save your draft. Please try again.",
+   384→      ),
+   385→  });
+   386→
+   387→  const deleteDraftMutation = useMutation({
+   388→    mutationFn: (id: string) => api.del<{ ok: boolean }>(`/api/customer/drafts/${id}`),
+   389→    onSuccess: (_res, id) => {
+   390→      queryClient.invalidateQueries({ queryKey: ["customer-drafts"] });
+   391→      if (draftId === id) setDraftId(null);
+   392→      toast({ title: "Draft deleted" });
+   393→    },
+   394→    onError: () =>
+   395→      toast({ title: "We could not delete that draft", description: "Please try again." }),
+   396→  });
+   397→
+   398→  const submitMutation = useMutation({
+   399→    mutationFn: () => {
+   400→      const notes = [
+   401→        orderNotes.trim() ? `Order notes: ${orderNotes.trim()}` : null,
+   402→        specialInstructions.trim() ? `Special instructions: ${specialInstructions.trim()}` : null,
+   403→      ]
+   404→        .filter(Boolean)
+   405→        .join("\n\n");
+   406→      return api.post<{ id: string; orderNumber: string }>("/api/customer/orders", {
+   407→        items: [
+   408→          ...lines.map((l) => {
+   409→            const ex = extrasFor(l.productId);
+   410→            return {
+   411→              productId: l.productId,
+   412→              qty: l.qty,
+   413→              note: ex.note.trim() || undefined,
+   414→              specs: cleanSpecs(ex.specs) || undefined,
+   415→              attachments: ex.attachments.length > 0 ? ex.attachments : undefined,
+   416→            };
+   417→          }),
+   418→          ...customLines.map((c) => ({
+   419→            custom: true as const,
+   420→            name: c.name,
+   421→            description: c.description || undefined,
+   422→            qty: c.qty,
+   423→            note: c.note || undefined,
+   424→            specs: cleanSpecs(c.specs) || undefined,
+   425→            attachments: c.attachments.length > 0 ? c.attachments : undefined,
+   426→          })),
+   427→        ],
+   428→        addressId: selectedAddress?.id,
+   429→        poNumber: poNumber.trim() || undefined,
+   430→        notes: notes || undefined,
+   431→        requestedDeliveryDate: requestedDeliveryDate || undefined,
+   432→        attachments: orderAttachments.length > 0 ? orderAttachments : undefined,
+   433→        draftId: draftId ?? undefined,
+   434→      });
+   435→    },
+   436→    onSuccess: (res) => {
+   437→      clear();
+   438→      setExtras({});
+   439→      setExpanded({});
+   440→      setCustomLines([]);
+   441→      setCustomFormOpen(false);
+   442→      setOrderAttachments([]);
+   443→      setAddressId("");
+   444→      setOrderNotes("");
+   445→      setRequestedDeliveryDate("");
+   446→      setPoNumber("");
+   447→      setSpecialInstructions("");
+   448→      setDraftId(null);
+   449→      setStep(1);
+   450→      setSubmitError(null);
+   451→      queryClient.invalidateQueries({ queryKey: ["orders"] });
+   452→      queryClient.invalidateQueries({ queryKey: ["customer-dashboard"] });
+   453→      queryClient.invalidateQueries({ queryKey: ["notifications"] });
+   454→      queryClient.invalidateQueries({ queryKey: ["customer-drafts"] });
+   455→      toast({
+   456→        title: "Order request submitted",
+   457→        description: `${res.orderNumber} — we'll confirm availability and pricing, then notify you.`,
+   458→      });
+   459→      navigate("order-detail", { id: res.id });
+   460→    },
+   461→    onError: (err) =>
+   462→      setSubmitError(
+   463→        err instanceof Error ? err.message : "We could not submit your order request. Please try again.",
+   464→      ),
+   465→  });
+   466→
+   467→  function goTo(next: number) {
+   468→    if (next > 1 && totalLineCount === 0) {
+   469→      toast({
+   470→        title: "Add at least one item",
+   471→        description: "Add a catalogue product or a custom product request to continue.",
+   472→      });
+   473→      return;
+   474→    }
+   475→    if (next > 1 && !validQtys) {
+   476→      toast({
+   477→        title: "Check your quantities",
+   478→        description: "Quantities must respect each product's minimum and multiples.",
+   479→      });
+   480→      return;
+   481→    }
+   482→    setSubmitError(null);
+   483→    setStep(next);
+   484→  }
+   485→
+   486→  function submit(e: React.FormEvent) {
+   487→    e.preventDefault();
+   488→    // Enter in any input behaves like "Continue" until the final step.
+   489→    if (step < 4) {
+   490→      goTo(step + 1);
+   491→      return;
+   492→    }
+   493→    if (totalLineCount === 0) {
+   494→      setSubmitError("Add at least one item before submitting.");
+   495→      return;
+   496→    }
+   497→    if (!validQtys) {
+   498→      setSubmitError("Quantities must respect each product's minimum and multiples.");
+   499→      return;
+   500→    }
+   501→    setSubmitError(null);
+   502→    submitMutation.mutate();
+   503→  }
+   504→
+   505→  function submitAddress(e: React.FormEvent) {
+   506→    e.preventDefault();
+   507→    if (
+   508→      !addressForm.label.trim() ||
+   509→      !addressForm.line1.trim() ||
+   510→      !addressForm.city.trim() ||
+   511→      !addressForm.province.trim() ||
+   512→      !addressForm.postal.trim()
+   513→    ) {
+   514→      setAddressFormError("Label, street, city, province and postal code are required.");
+   515→      return;
+   516→    }
+   517→    setAddressFormError(null);
+   518→    newAddressMutation.mutate();
+   519→  }
+   520→
+   521→  function submitDraft(e: React.FormEvent) {
+   522→    e.preventDefault();
+   523→    setDraftError(null);
+   524→    saveDraftMutation.mutate();
+   525→  }
+   526→
+   527→  function openDraftDialog() {
+   528→    const current = draftId ? drafts?.find((d) => d.id === draftId)?.name : undefined;
+   529→    setDraftName(current ?? defaultDraftName());
+   530→    setDraftError(null);
+   531→    setDraftDialogOpen(true);
+   532→  }
+   533→
+   534→  const hasContent = lines.length > 0 || customLines.length > 0 || customFormOpen;
+   535→
+   536→  if (!hasContent) {
+   537→    return (
+   538→      <motion.div {...enter}>
+   539→        <PageHeader
+   540→          title="Order Builder"
+   541→          description="Build an order request from your approved products — or describe a custom need for us to quote."
+   542→        />
+   543→        <EmptyState
+   544→          icon={ShoppingCart}
+   545→          title="Your cart is empty"
+   546→          description="Browse your approved catalogue and add products — pricing specific to your account is shown on every item. Custom needs are welcome too."
+   547→          action={
+   548→            <div className="flex flex-wrap items-center justify-center gap-2">
+   549→              <Button onClick={() => navigate("catalog")} className="gap-2">
+   550→                Browse products <ChevronRight className="size-4" aria-hidden />
+   551→              </Button>
+   552→              <Button variant="outline" onClick={() => setCustomFormOpen(true)}>
+   553→                Request a custom product
+   554→              </Button>
+   555→            </div>
+   556→          }
+   557→        />
+   558→        {(drafts?.length ?? 0) > 0 && (
+   559→          <div className="mt-8">
+   560→            <DraftStrip
+   561→              drafts={drafts ?? []}
+   562→              deletingId={deleteDraftMutation.isPending ? deleteDraftMutation.variables ?? null : null}
+   563→              onContinue={requestContinueDraft}
+   564→              onDelete={(d) => deleteDraftMutation.mutate(d.id)}
+   565→            />
+   566→          </div>
+   567→        )}
+   568→      </motion.div>
+   569→    );
+   570→  }
+   571→
+   572→  return (
+   573→    <motion.div {...enter}>
+   574→      <PageHeader
+   575→        title="Order Builder"
+   576→        description="Submitting sends a request — Jeffery Group confirms availability, pricing and the delivery date before anything is produced or shipped."
+   577→      />
+   578→
+   579→      {/* Saved drafts strip */}
+   580→      {(drafts?.length ?? 0) > 0 && (
+   581→        <div className="mb-6">
+   582→          <DraftStrip
+   583→            drafts={drafts ?? []}
+   584→            deletingId={deleteDraftMutation.isPending ? deleteDraftMutation.variables ?? null : null}
+   585→            onContinue={requestContinueDraft}
+   586→            onDelete={(d) => deleteDraftMutation.mutate(d.id)}
+   587→          />
+   588→        </div>
+   589→      )}
+   590→
+   591→      {/* Stepper */}
+   592→      <ol className="mb-6 flex flex-wrap items-center gap-x-1 gap-y-2" aria-label="Order request steps">
+   593→        {STEPS.map((s, i) => {
+   594→          const done = s.n < step;
+   595→          const current = s.n === step;
+   596→          return (
+   597→            <li key={s.n} className="flex items-center gap-1.5 sm:gap-2">
+   598→              <button
+   599→                type="button"
+   600→                disabled={s.n >= step}
+   601→                onClick={() => goTo(s.n)}
+   602→                aria-current={current ? "step" : undefined}
+   603→                className={cn(
+   604→                  "flex items-center gap-2 rounded-full py-1 pl-1 pr-2.5 text-body-sm transition-colors",
+   605→                  s.n >= step ? "cursor-default" : "hover:bg-accent",
+   606→                  current
+   607→                    ? "font-semibold text-foreground"
+   608→                    : done
+   609→                      ? "text-muted-foreground"
+   610→                      : "text-muted-foreground/70",
+   611→                )}
+   612→              >
+   613→                <span
+   614→                  className={cn(
+   615→                    "tnum flex size-6 items-center justify-center rounded-full border text-caption font-semibold",
+   616→                    done && "border-primary bg-primary text-primary-foreground",
+   617→                    current && "border-kraft-strong bg-kraft-soft text-kraft-ink",
+   618→                    !done && !current && "border-border bg-card text-muted-foreground",
+   619→                  )}
+   620→                >
+   621→                  {done ? <Check className="size-3.5" aria-hidden /> : s.n}
+   622→                </span>
+   623→                {s.label}
+   624→              </button>
+   625→              {i < STEPS.length - 1 && <span className="h-px w-4 bg-border sm:w-7" aria-hidden />}
+   626→            </li>
+   627→          );
+   628→        })}
+   629→      </ol>
+   630→
+   631→      <form onSubmit={submit} className="space-y-8">
+   632→        {/* ── Step 1: Items ── */}
+   633→        {step === 1 && (
+   634→          <SectionCard
+   635→            title={<StepTitle n={1}>Items</StepTitle>}
+   636→            description="Quantities respect each product's minimum and multiples. Add optional specifications, notes and file references per line."
+   637→            contentClassName="p-0 sm:p-0"
+   638→          >
+   639→            {/* Desktop table */}
+   640→            <div className="hidden md:block">
+   641→              <Table>
+   642→                <TableHeader>
+   643→                  <TableRow className="hover:bg-transparent">
+   644→                    <TableHead className="w-[42%]">Product</TableHead>
+   645→                    <TableHead className="text-right">Unit price</TableHead>
+   646→                    <TableHead className="text-center">Quantity</TableHead>
+   647→                    <TableHead className="text-right">Line total</TableHead>
+   648→                    <TableHead className="w-12" />
+   649→                  </TableRow>
+   650→                </TableHeader>
+   651→                <TableBody>
+   652→                  {lines.map((l) => {
+   653→                    const ex = extrasFor(l.productId);
+   654→                    const open = expanded[l.productId] ?? false;
+   655→                    return (
+   656→                      <Fragment key={l.productId}>
+   657→                        <TableRow>
+   658→                          <TableCell>
+   659→                            <div className="flex items-center gap-3">
+   660→                              <ProductArtwork sku={l.sku} compact />
+   661→                              <div className="min-w-0">
+   662→                                <p className="truncate text-body-sm font-semibold leading-snug text-foreground">{l.name}</p>
+   663→                                <Mono className="text-muted-foreground">{l.sku}</Mono>
+   664→                                <SpecsToggle
+   665→                                  open={open}
+   666→                                  filled={hasLineExtras(ex)}
+   667→                                  onClick={() => setExpanded((m) => ({ ...m, [l.productId]: !open }))}
+   668→                                />
+   669→                              </div>
+   670→                            </div>
+   671→                          </TableCell>
+   672→                          <TableCell className="text-right">
+   673→                            <Money cents={l.unitPriceCents} />
+   674→                            <p className="text-caption text-muted-foreground">per {l.unit}</p>
+   675→                          </TableCell>
+   676→                          <TableCell>
+   677→                            <div className="flex justify-center">
+   678→                              <QtyStepper
+   679→                                value={l.qty}
+   680→                                onChange={(q) => setQty(l.productId, q)}
+   681→                                min={l.minOrderQty}
+   682→                                increment={l.increment}
+   683→                                size="sm"
+   684→                                ariaLabel={`Quantity of ${l.name}`}
+   685→                              />
+   686→                            </div>
+   687→                            <p className="mt-1 text-center text-caption text-muted-foreground">
+   688→                              min {l.minOrderQty.toLocaleString()} · +{l.increment.toLocaleString()}
+   689→                            </p>
+   690→                          </TableCell>
+   691→                          <TableCell className="text-right">
+   692→                            <Money cents={l.qty * l.unitPriceCents} className="font-medium" />
+   693→                          </TableCell>
+   694→                          <TableCell className="text-right">
+   695→                            <Button
+   696→                              variant="ghost"
+   697→                              size="icon"
+   698→                              className="size-8 text-muted-foreground hover:text-[var(--status-danger-fg)]"
+   699→                              onClick={() => removeCatalogueLine(l.productId)}
+   700→                              aria-label={`Remove ${l.name} from cart`}
+   701→                            >
+   702→                              <Trash2 className="size-4" aria-hidden />
+   703→                            </Button>
+   704→                          </TableCell>
+   705→                        </TableRow>
+   706→                        {open && (
+   707→                          <TableRow className="hover:bg-transparent">
+   708→                            <TableCell colSpan={5} className="bg-surface-sunken/60 px-4 py-4 sm:px-5">
+   709→                              <LineExtrasPanel
+   710→                                idPrefix={`line-${l.productId}`}
+   711→                                extras={ex}
+   712→                                onChange={(next) => setExtras((m) => ({ ...m, [l.productId]: next }))}
+   713→                              />
+   714→                            </TableCell>
+   715→                          </TableRow>
+   716→                        )}
+   717→                      </Fragment>
+   718→                    );
+   719→                  })}
+   720→                  {customLines.map((c) => (
+   721→                    <TableRow key={c.localId}>
+   722→                      <TableCell>
+   723→                        <div className="flex items-center gap-3">
+   724→                          <CustomArtwork />
+   725→                          <div className="min-w-0">
+   726→                            <p className="flex flex-wrap items-center gap-1.5 text-body-sm font-semibold leading-snug text-foreground">
+   727→                              <span className="truncate">{c.name}</span>
+   728→                              <Chip>Custom request</Chip>
+   729→                            </p>
+   730→                            {c.description && (
+   731→                              <p className="mt-0.5 line-clamp-2 text-caption text-muted-foreground">{c.description}</p>
+   732→                            )}
+   733→                            <SpecChips specs={c.specs} />
+   734→                            <AttachmentChips attachments={c.attachments} />
+   735→                          </div>
+   736→                        </div>
+   737→                      </TableCell>
+   738→                      <TableCell className="text-right">
+   739→                        <span className="text-caption text-muted-foreground">Pricing to be confirmed</span>
+   740→                      </TableCell>
+   741→                      <TableCell>
+   742→                        <div className="flex justify-center">
+   743→                          <QtyStepper
+   744→                            value={c.qty}
+   745→                            onChange={(q) => updateCustomQty(c.localId, q)}
+   746→                            size="sm"
+   747→                            ariaLabel={`Quantity of ${c.name}`}
+   748→                          />
+   749→                        </div>
+   750→                      </TableCell>
+   751→                      <TableCell className="text-right">
+   752→                        <span className="text-caption text-muted-foreground">—</span>
+   753→                      </TableCell>
+   754→                      <TableCell className="text-right">
+   755→                        <Button
+   756→                          variant="ghost"
+   757→                          size="icon"
+   758→                          className="size-8 text-muted-foreground hover:text-[var(--status-danger-fg)]"
+   759→                          onClick={() => removeCustomLine(c.localId)}
+   760→                          aria-label={`Remove ${c.name} from cart`}
+   761→                        >
+   762→                          <Trash2 className="size-4" aria-hidden />
+   763→                        </Button>
+   764→                      </TableCell>
+   765→                    </TableRow>
+   766→                  ))}
+   767→                </TableBody>
+   768→              </Table>
+   769→            </div>
+   770→
+   771→            {/* Mobile stacked cards */}
+   772→            <ul className="divide-y md:hidden">
+   773→              {lines.map((l) => {
+   774→                const ex = extrasFor(l.productId);
+   775→                const open = expanded[l.productId] ?? false;
+   776→                return (
+   777→                  <li key={l.productId} className="flex flex-col gap-3 px-5 py-4">
+   778→                    <div className="flex items-start justify-between gap-3">
+   779→                      <div className="flex min-w-0 items-center gap-3">
+   780→                        <ProductArtwork sku={l.sku} compact />
+   781→                        <div className="min-w-0">
+   782→                          <p className="truncate text-body-sm font-semibold leading-snug text-foreground">{l.name}</p>
+   783→                          <Mono className="text-muted-foreground">{l.sku}</Mono>
+   784→                        </div>
+   785→                      </div>
+   786→                      <Button
+   787→                        variant="ghost"
+   788→                        size="icon"
+   789→                        className="size-8 shrink-0 text-muted-foreground hover:text-[var(--status-danger-fg)]"
+   790→                        onClick={() => removeCatalogueLine(l.productId)}
+   791→                        aria-label={`Remove ${l.name} from cart`}
+   792→                      >
+   793→                        <Trash2 className="size-4" aria-hidden />
+   794→                      </Button>
+   795→                    </div>
+   796→                    <div className="flex items-center justify-between gap-3">
+   797→                      <QtyStepper
+   798→                        value={l.qty}
+   799→                        onChange={(q) => setQty(l.productId, q)}
+   800→                        min={l.minOrderQty}
+   801→                        increment={l.increment}
+   802→                        size="sm"
+   803→                        ariaLabel={`Quantity of ${l.name}`}
+   804→                      />
+   805→                      <div className="text-right">
+   806→                        <Money cents={l.qty * l.unitPriceCents} className="text-body font-semibold" />
+   807→                        <p className="text-caption text-muted-foreground">
+   808→                          <Money cents={l.unitPriceCents} muted /> per {l.unit}
+   809→                        </p>
+   810→                      </div>
+   811→                    </div>
+   812→                    <Collapsible open={open} onOpenChange={(o) => setExpanded((m) => ({ ...m, [l.productId]: o }))}>
+   813→                      <CollapsibleTrigger asChild>
+   814→                        <SpecsToggle open={open} filled={hasLineExtras(ex)} />
+   815→                      </CollapsibleTrigger>
+   816→                      <CollapsibleContent className="mt-2.5 rounded-[10px] border bg-surface-sunken/60 p-3.5">
+   817→                        <LineExtrasPanel
+   818→                          idPrefix={`line-${l.productId}`}
+   819→                          extras={ex}
+   820→                          onChange={(next) => setExtras((m) => ({ ...m, [l.productId]: next }))}
+   821→                        />
+   822→                      </CollapsibleContent>
+   823→                    </Collapsible>
+   824→                  </li>
+   825→                );
+   826→              })}
+   827→              {customLines.map((c) => (
+   828→                <li key={c.localId} className="flex flex-col gap-3 px-5 py-4">
+   829→                  <div className="flex items-start justify-between gap-3">
+   830→                    <div className="flex min-w-0 items-center gap-3">
+   831→                      <CustomArtwork />
+   832→                      <div className="min-w-0">
+   833→                        <p className="flex flex-wrap items-center gap-1.5 text-body-sm font-semibold leading-snug text-foreground">
+   834→                          <span className="truncate">{c.name}</span>
+   835→                          <Chip>Custom request</Chip>
+   836→                        </p>
+   837→                        {c.description && (
+   838→                          <p className="mt-0.5 line-clamp-2 text-caption text-muted-foreground">{c.description}</p>
+   839→                        )}
+   840→                      </div>
+   841→                    </div>
+   842→                    <Button
+   843→                      variant="ghost"
+   844→                      size="icon"
+   845→                      className="size-8 shrink-0 text-muted-foreground hover:text-[var(--status-danger-fg)]"
+   846→                      onClick={() => removeCustomLine(c.localId)}
+   847→                      aria-label={`Remove ${c.name} from cart`}
+   848→                    >
+   849→                      <Trash2 className="size-4" aria-hidden />
+   850→                    </Button>
+   851→                  </div>
+   852→                  <div className="flex items-center justify-between gap-3">
+   853→                    <QtyStepper
+   854→                      value={c.qty}
+   855→                      onChange={(q) => updateCustomQty(c.localId, q)}
+   856→                      size="sm"
+   857→                      ariaLabel={`Quantity of ${c.name}`}
+   858→                    />
+   859→                    <span className="text-caption text-muted-foreground">Pricing to be confirmed</span>
+   860→                  </div>
+   861→                  <SpecChips specs={c.specs} />
+   862→                  <AttachmentChips attachments={c.attachments} />
+   863→                </li>
+   864→              ))}
+   865→            </ul>
+   866→
+   867→            {/* Custom product request */}
+   868→            <div className="border-t px-5 py-4">
+   869→              {customFormOpen ? (
+   870→                <CustomLineForm
+   871→                  onSubmit={(line) => {
+   872→                    setCustomLines((cs) => [...cs, line]);
+   873→                    setCustomFormOpen(false);
+   874→                    toast({
+   875→                      title: "Custom request added",
+   876→                      description: `${line.name} — pricing is confirmed by Jeffery Group when you submit the request.`,
+   877→                    });
+   878→                  }}
+   879→                  onCancel={() => setCustomFormOpen(false)}
+   880→                />
+   881→              ) : (
+   882→                <button
+   883→                  type="button"
+   884→                  onClick={() => setCustomFormOpen(true)}
+   885→                  className="flex w-full items-center justify-center gap-2 rounded-[14px] border border-dashed px-4 py-3 text-body-sm font-medium text-muted-foreground transition-colors hover:border-kraft/60 hover:text-foreground"
+   886→                >
+   887→                  <Package className="size-4" aria-hidden />
+   888→                  Add custom product request
+   889→                </button>
+   890→              )}
+   891→            </div>
+   892→
+   893→            {/* Totals footer */}
+   894→            <div className="border-t bg-surface-sunken/50 px-5 py-4">
+   895→              <CartTotals subtotal={subtotal} tax={tax} total={total} customCount={customLines.length} />
+   896→            </div>
+   897→          </SectionCard>
+   898→        )}
+   899→
+   900→        {/* ── Step 2: Delivery ── */}
+   901→        {step === 2 && (
+   902→          <SectionCard
+   903→            title={<StepTitle n={2}>Delivery details</StepTitle>}
+   904→            description="Where should this order ship, and anything we should know? Addresses you add are active right away."
+   905→          >
+   906→            {addressesError ? (
+   907→              <ErrorAlert message="We could not load your shipping addresses." />
+   908→            ) : addressesLoading || addressesData === undefined ? (
+   909→              <div className="space-y-3">
+   910→                <Skeleton className="h-10 w-full" />
+   911→                <Skeleton className="h-16 w-full" />
+   912→                <Skeleton className="h-20 w-full" />
+   913→              </div>
+   914→            ) : (
+   915→              <div className="space-y-4">
+   916→                {approvedAddresses.length === 0 ? (
+   917→                  <div className="rounded-[10px] border border-kraft/40 bg-kraft-soft/60 px-4 py-3 text-body-sm text-kraft-ink">
+   918→                    No shipping addresses yet — add one below and it becomes available at checkout
+   919→                    immediately.
+   920→                  </div>
+   921→                ) : (
+   922→                  <>
+   923→                    <div className="space-y-2">
+   924→                      <Label htmlFor="cart-address">Shipping address</Label>
+   925→                      <Select
+   926→                        value={selectedAddress?.id ?? ""}
+   927→                        onValueChange={(v) => setAddressId(v)}
+   928→                      >
+   929→                        <SelectTrigger id="cart-address" className="w-full sm:w-[380px]">
+   930→                          <SelectValue placeholder="Choose an address" />
+   931→                        </SelectTrigger>
+   932→                        <SelectContent>
+   933→                          {approvedAddresses.map((a) => (
+   934→                            <SelectItem key={a.id} value={a.id}>
+   935→                              {a.label}
+   936→                              {a.isDefault ? " (default)" : ""}
+   937→                            </SelectItem>
+   938→                          ))}
+   939→                        </SelectContent>
+   940→                      </Select>
+   941→                    </div>
+   942→                    {selectedAddress && (
+   943→                      <div className="rounded-[10px] border bg-surface-sunken/60 px-4 py-3">
+   944→                        <p className="flex items-center gap-1.5 text-micro text-muted-foreground">
+   945→                          <Truck className="size-3.5" aria-hidden /> Ships to
+   946→                        </p>
+   947→                        <p className="mt-1.5 text-body-sm font-semibold text-foreground">{selectedAddress.label}</p>
+   948→                        <p className="mt-0.5 text-body-sm text-muted-foreground">
+   949→                          {selectedAddress.line1}
+   950→                          {selectedAddress.line2 ? `, ${selectedAddress.line2}` : ""}
+   951→                          <br />
+   952→                          {selectedAddress.city}, {selectedAddress.province} {selectedAddress.postal}
+   953→                        </p>
+   954→                      </div>
+   955→                    )}
+   956→                  </>
+   957→                )}
+   958→                {approvedAddresses.length > 0 && (
+   959→                  <p className="text-caption text-muted-foreground">
+   960→                    Need a different destination? Add it below — it is usable immediately.
+   961→                  </p>
+   962→                )}
+   963→                <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+   964→                  <Button
+   965→                    type="button"
+   966→                    variant="outline"
+   967→                    size="sm"
+   968→                    className="h-8 gap-1.5"
+   969→                    onClick={() => {
+   970→                      setAddressForm(EMPTY_ADDRESS_FORM);
+   971→                      setAddressFormError(null);
+   972→                      setAddressDialogOpen(true);
+   973→                    }}
+   974→                  >
+   975→                    Add a new address
+   976→                  </Button>
+   977→                  <button
+   978→                    type="button"
+   979→                    className="text-caption font-medium text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline"
+   980→                    onClick={() => navigate("settings")}
+   981→                  >
+   982→                    Manage addresses in Settings
+   983→                  </button>
+   984→                </div>
+   985→                <div className="space-y-2">
+   986→                  <Label htmlFor="cart-notes">Order notes</Label>
+   987→                  <Textarea
+   988→                    id="cart-notes"
+   989→                    rows={3}
+   990→                    maxLength={2000}
+   991→                    placeholder="Anything our order desk should know — dock hours, receiving contacts, packaging preferences…"
+   992→                    value={orderNotes}
+   993→                    onChange={(e) => setOrderNotes(e.target.value)}
+   994→                  />
+   995→                </div>
+   996→                <div className="max-w-xs space-y-2">
+   997→                  <Label htmlFor="cart-delivery-date">Requested delivery date</Label>
+   998→                  <Input
+   999→                    id="cart-delivery-date"
+  1000→                    type="date"
+  1001→                    value={requestedDeliveryDate}
+  1002→                    onChange={(e) => setRequestedDeliveryDate(e.target.value)}
+  1003→                  />
+  1004→                  <p className="text-caption text-pretty leading-relaxed text-muted-foreground">
+  1005→                    Requested only — Jeffery Group confirms the actual date. This is not a guaranteed
+  1006→                    delivery date.
+  1007→                  </p>
+  1008→                </div>
+  1009→              </div>
+  1010→            )}
+  1011→          </SectionCard>
+  1012→        )}
+  1013→
+  1014→        {/* ── Step 3: Reference ── */}
+  1015→        {step === 3 && (
+  1016→          <SectionCard
+  1017→            title={<StepTitle n={3}>Reference details</StepTitle>}
+  1018→            description="Optional — helps you match this request to your own records."
+  1019→          >
+  1020→            <div className="space-y-4">
+  1021→              <div className="max-w-md space-y-2">
+  1022→                <Label htmlFor="cart-po">PO reference</Label>
+  1023→                <Input
+  1024→                  id="cart-po"
+  1025→                  maxLength={60}
+  1026→                  placeholder="e.g. MLP-PO-0918"
+  1027→                  value={poNumber}
+  1028→                  onChange={(e) => setPoNumber(e.target.value)}
+  1029→                />
+  1030→                <p className="text-caption text-muted-foreground">Your purchase order number, if one applies.</p>
+  1031→              </div>
+  1032→              <div className="space-y-2">
+  1033→                <Label htmlFor="cart-special">Special instructions</Label>
+  1034→                <Textarea
+  1035→                  id="cart-special"
+  1036→                  rows={4}
+  1037→                  maxLength={2000}
+  1038→                  placeholder="Handling, packing or delivery preferences beyond the order notes…"
+  1039→                  value={specialInstructions}
+  1040→                  onChange={(e) => setSpecialInstructions(e.target.value)}
+  1041→                />
+  1042→              </div>
+  1043→              <Separator />
+  1044→              <div className="space-y-2">
+  1045→                <p className="text-micro text-muted-foreground">Order attachments (optional)</p>
+  1046→                <AttachmentPicker
+  1047→                  idPrefix="order"
+  1048→                  attachments={orderAttachments}
+  1049→                  onChange={setOrderAttachments}
+  1050→                />
+  1051→              </div>
+  1052→            </div>
+  1053→          </SectionCard>
+  1054→        )}
+  1055→
+  1056→        {/* ── Step 4: Review & submit ── */}
+  1057→        {step === 4 && (
+  1058→          <div className="grid grid-cols-1 gap-8 lg:grid-cols-[minmax(0,1fr)_360px]">
+  1059→            <SectionCard
+  1060→              title={<StepTitle n={4}>Final review</StepTitle>}
+  1061→              description="Check everything before submitting your request."
+  1062→              contentClassName="p-0 sm:p-0"
+  1063→            >
+  1064→              <ul className="divide-y">
+  1065→                {lines.map((l) => {
+  1066→                  const ex = extrasFor(l.productId);
+  1067→                  return (
+  1068→                    <li key={l.productId} className="px-5 py-3.5">
+  1069→                      <div className="flex items-center gap-3">
+  1070→                        <ProductArtwork sku={l.sku} compact className="hidden sm:block" />
+  1071→                        <div className="min-w-0 flex-1">
+  1072→                          <p className="truncate text-body-sm font-semibold text-foreground">{l.name}</p>
+  1073→                          <p className="text-caption text-muted-foreground">
+  1074→                            <Mono>{l.sku}</Mono> · <span className="tnum">{l.qty.toLocaleString()}</span>{" "}
+  1075→                            × <Money cents={l.unitPriceCents} muted />
+  1076→                          </p>
+  1077→                          <SpecChips specs={ex.specs} />
+  1078→                          {ex.note.trim() && (
+  1079→                            <p className="mt-1 text-caption text-pretty leading-relaxed text-muted-foreground">
+  1080→                              Note: {ex.note.trim()}
+  1081→                            </p>
+  1082→                          )}
+  1083→                          <AttachmentChips attachments={ex.attachments} />
+  1084→                        </div>
+  1085→                        <Money cents={l.qty * l.unitPriceCents} className="text-body-sm font-semibold" />
+  1086→                      </div>
+  1087→                    </li>
+  1088→                  );
+  1089→                })}
+  1090→                {customLines.map((c) => (
+  1091→                  <li key={c.localId} className="px-5 py-3.5">
+  1092→                    <div className="flex items-center gap-3">
+  1093→                      <CustomArtwork className="hidden sm:flex" />
+  1094→                      <div className="min-w-0 flex-1">
+  1095→                        <p className="flex flex-wrap items-center gap-1.5 text-body-sm font-semibold text-foreground">
+  1096→                          <span className="truncate">{c.name}</span>
+  1097→                          <Chip>Custom request</Chip>
+  1098→                        </p>
+  1099→                        {c.description && (
+  1100→                          <p className="mt-0.5 line-clamp-2 text-caption text-pretty leading-relaxed text-muted-foreground">
+  1101→                            {c.description}
+  1102→                          </p>
+  1103→                        )}
+  1104→                        <p className="mt-0.5 text-caption text-muted-foreground">
+  1105→                          <span className="tnum">{c.qty.toLocaleString()}</span> × pricing to be confirmed
+  1106→                        </p>
+  1107→                        <SpecChips specs={c.specs} />
+  1108→                        {c.note && (
+  1109→                          <p className="mt-1 text-caption text-pretty leading-relaxed text-muted-foreground">Note: {c.note}</p>
+  1110→                        )}
+  1111→                        <AttachmentChips attachments={c.attachments} />
+  1112→                      </div>
+  1113→                      <span className="shrink-0 text-caption text-muted-foreground">TBC</span>
+  1114→                    </div>
+  1115→                  </li>
+  1116→                ))}
+  1117→              </ul>
+  1118→            </SectionCard>
+  1119→
+  1120→            {/* Sticky order summary — totals, submit, reassurance */}
+  1121→            <SectionCard title="Request summary" className="lg:sticky lg:top-24 lg:self-start">
+  1122→              <dl className="m-0 space-y-4 text-body-sm">
+  1123→                <div>
+  1124→                  <dt className="text-micro text-muted-foreground">Items</dt>
+  1125→                  <dd className="mt-1 text-foreground">
+  1126→                    {lines.length > 0 && (
+  1127→                      <>
+  1128→                        {lines.length} product{lines.length === 1 ? "" : "s"}
+  1129→                      </>
+  1130→                    )}
+  1131→                    {lines.length > 0 && customLines.length > 0 && " · "}
+  1132→                    {customLines.length > 0 &&
+  1133→                      `${customLines.length} custom request${customLines.length === 1 ? "" : "s"}`}{" "}
+  1134→                    · {totalUnits.toLocaleString()} units
+  1135→                  </dd>
+  1136→                </div>
+  1137→                <div>
+  1138→                  <dt className="text-micro text-muted-foreground">Ship to</dt>
+  1139→                  <dd className="mt-1 text-foreground">
+  1140→                    {selectedAddress ? (
+  1141→                      <>
+  1142→                        {selectedAddress.label}
+  1143→                        <span className="block text-muted-foreground">
+  1144→                          {selectedAddress.line1}
+  1145→                          {selectedAddress.line2 ? `, ${selectedAddress.line2}` : ""}
+  1146→                          {", "}
+  1147→                          {selectedAddress.city}, {selectedAddress.province} {selectedAddress.postal}
+  1148→                        </span>
+  1149→                      </>
+  1150→                    ) : (
+  1151→                      <span className="text-muted-foreground">No address selected</span>
+  1152→                    )}
+  1153→                  </dd>
+  1154→                </div>
+  1155→                {requestedDeliveryDate && (
+  1156→                  <div>
+  1157→                    <dt className="text-micro text-muted-foreground">Requested delivery date</dt>
+  1158→                    <dd className="mt-1 text-foreground">
+  1159→                      {formatDate(`${requestedDeliveryDate}T12:00:00`)}
+  1160→                      <span className="block text-caption text-muted-foreground">
+  1161→                        Requested, not guaranteed — Jeffery Group confirms the actual date.
+  1162→                      </span>
+  1163→                    </dd>
+  1164→                  </div>
+  1165→                )}
+  1166→                {poNumber.trim() && (
+  1167→                  <div>
+  1168→                    <dt className="text-micro text-muted-foreground">PO reference</dt>
+  1169→                    <dd className="mt-1 text-foreground">{poNumber.trim()}</dd>
+  1170→                  </div>
+  1171→                )}
+  1172→                {(orderNotes.trim() || specialInstructions.trim()) && (
+  1173→                  <div>
+  1174→                    <dt className="text-micro text-muted-foreground">Notes</dt>
+  1175→                    <dd className="mt-1 whitespace-pre-line text-muted-foreground">
+  1176→                      {[
+  1177→                        orderNotes.trim() && `Order notes: ${orderNotes.trim()}`,
+  1178→                        specialInstructions.trim() && `Special instructions: ${specialInstructions.trim()}`,
+  1179→                      ]
+  1180→                        .filter(Boolean)
+  1181→                        .join("\n\n")}
+  1182→                    </dd>
+  1183→                  </div>
+  1184→                )}
+  1185→                {orderAttachments.length > 0 && (
+  1186→                  <div>
+  1187→                    <dt className="text-micro text-muted-foreground">Order attachments</dt>
+  1188→                    <dd className="mt-1">
+  1189→                      <AttachmentChips attachments={orderAttachments} className="mt-0" />
+  1190→                    </dd>
+  1191→                  </div>
+  1192→                )}
+  1193→              </dl>
+  1194→
+  1195→              <CartTotals
+  1196→                subtotal={subtotal}
+  1197→                tax={tax}
+  1198→                total={total}
+  1199→                customCount={customLines.length}
+  1200→                className="ml-0 mt-6 max-w-none border-t pt-4"
+  1201→              />
+  1202→
+  1203→              {submitError && (
+  1204→                <div
+  1205→                  role="alert"
+  1206→                  className="mb-4 mt-4 rounded-[10px] bg-[var(--status-danger-bg)] px-3.5 py-2.5 text-body-sm text-[var(--status-danger-fg)]"
+  1207→                >
+  1208→                  {submitError}
+  1209→                </div>
+  1210→              )}
+  1211→              <Button
+  1212→                type="submit"
+  1213→                size="lg"
+  1214→                className="w-full gap-2"
+  1215→                disabled={submitMutation.isPending || approvedAddresses.length === 0}
+  1216→              >
+  1217→                {submitMutation.isPending ? (
+  1218→                  <>
+  1219→                    <Loader2 className="size-4 animate-spin" aria-hidden /> Submitting…
+  1220→                  </>
+  1221→                ) : (
+  1222→                  <>
+  1223→                    <Check className="size-4" aria-hidden /> Submit order request
+  1224→                  </>
+  1225→                )}
+  1226→              </Button>
+  1227→              <p className="mt-3 text-caption text-pretty leading-relaxed text-muted-foreground">
+  1228→                No goods are promised or reserved at this point. Our order desk reviews availability and
+  1229→                pricing, then confirms with you before production. Custom requests are quoted as part of
+  1230→                that review.
+  1231→              </p>
+  1232→            </SectionCard>
+  1233→          </div>
+  1234→        )}
+  1235→
+  1236→        {/* Step navigation */}
+  1237→        <div className="flex flex-wrap items-center justify-between gap-3">
+  1238→          {step > 1 ? (
+  1239→            <Button
+  1240→              type="button"
+  1241→              variant="outline"
+  1242→              className="gap-1.5"
+  1243→              onClick={() => goTo(step - 1)}
+  1244→              disabled={submitMutation.isPending}
+  1245→            >
+  1246→              <ArrowLeft className="size-4" aria-hidden /> Back
+  1247→            </Button>
+  1248→          ) : (
+  1249→            <span />
+  1250→          )}
+  1251→          <div className="flex items-center gap-2">
+  1252→            {step < 4 && (
+  1253→              <Button
+  1254→                type="button"
+  1255→                variant="ghost"
+  1256→                className="gap-1.5 text-muted-foreground"
+  1257→                disabled={saveDraftMutation.isPending || totalLineCount === 0}
+  1258→                onClick={openDraftDialog}
+  1259→              >
+  1260→                <Save className="size-4" aria-hidden /> Save as draft
+  1261→              </Button>
+  1262→            )}
+  1263→            {step < 4 && (
+  1264→              <Button type="button" className="gap-1.5" onClick={() => goTo(step + 1)}>
+  1265→                Continue <ArrowRight className="size-4" aria-hidden />
+  1266→              </Button>
+  1267→            )}
+  1268→          </div>
+  1269→        </div>
+  1270→      </form>
+  1271→
+  1272→      {/* ── Save-draft dialog ── */}
+  1273→      <Dialog open={draftDialogOpen} onOpenChange={setDraftDialogOpen}>
+  1274→        <DialogContent className="sm:max-w-[440px]">
+  1275→          <DialogHeader>
+  1276→            <DialogTitle>Save this order as a draft</DialogTitle>
+  1277→            <DialogDescription>
+  1278→              Your items, delivery and reference details are kept — nothing is submitted to Jeffery
+  1279→              Group.
+  1280→            </DialogDescription>
+  1281→          </DialogHeader>
+  1282→          <form onSubmit={submitDraft} className="space-y-4">
+  1283→            <div className="space-y-2">
+  1284→              <Label htmlFor="draft-name">Draft name</Label>
+  1285→              <Input
+  1286→                id="draft-name"
+  1287→                maxLength={120}
+  1288→                value={draftName}
+  1289→                onChange={(e) => setDraftName(e.target.value)}
+  1290→                placeholder={defaultDraftName()}
+  1291→              />
+  1292→            </div>
+  1293→            {draftError && (
+  1294→              <div
+  1295→                role="alert"
+  1296→                className="rounded-[10px] bg-[var(--status-danger-bg)] px-3.5 py-2.5 text-body-sm text-[var(--status-danger-fg)]"
+  1297→              >
+  1298→                {draftError}
+  1299→              </div>
+  1300→            )}
+  1301→            <DialogFooter className="gap-2">
+  1302→              <Button
+  1303→                type="button"
+  1304→                variant="outline"
+  1305→                onClick={() => setDraftDialogOpen(false)}
+  1306→                disabled={saveDraftMutation.isPending}
+  1307→              >
+  1308→                Cancel
+  1309→              </Button>
+  1310→              <Button type="submit" className="gap-2" disabled={saveDraftMutation.isPending}>
+  1311→                {saveDraftMutation.isPending ? (
+  1312→                  <>
+  1313→                    <Loader2 className="size-4 animate-spin" aria-hidden /> Saving…
+  1314→                  </>
+  1315→                ) : (
+  1316→                  <>
+  1317→                    <Save className="size-4" aria-hidden /> Save draft
+  1318→                  </>
+  1319→                )}
+  1320→              </Button>
+  1321→            </DialogFooter>
+  1322→          </form>
+  1323→        </DialogContent>
+  1324→      </Dialog>
+  1325→
+  1326→      {/* ── Add address dialog ── */}
+  1327→      <Dialog open={addressDialogOpen} onOpenChange={setAddressDialogOpen}>
+  1328→        <DialogContent className="sm:max-w-[520px]">
+  1329→          <DialogHeader>
+  1330→            <DialogTitle>Add a delivery address</DialogTitle>
+  1331→            <DialogDescription>
+  1332→              It is saved to your address book and ready to use at checkout right away — no review
+  1333→              needed.
+  1334→            </DialogDescription>
+  1335→          </DialogHeader>
+  1336→          <form onSubmit={submitAddress} className="space-y-4">
+  1337→            <div className="space-y-2">
+  1338→              <Label htmlFor="newaddr-label">Label</Label>
+  1339→              <Input
+  1340→                id="newaddr-label"
+  1341→                maxLength={80}
+  1342→                placeholder="e.g. Second Store — Danforth"
+  1343→                value={addressForm.label}
+  1344→                onChange={(e) => setAddressForm((f) => ({ ...f, label: e.target.value }))}
+  1345→              />
+  1346→            </div>
+  1347→            <div className="space-y-2">
+  1348→              <Label htmlFor="newaddr-line1">Street address</Label>
+  1349→              <Input
+  1350→                id="newaddr-line1"
+  1351→                maxLength={160}
+  1352→                placeholder="1082 Danforth Avenue"
+  1353→                value={addressForm.line1}
+  1354→                onChange={(e) => setAddressForm((f) => ({ ...f, line1: e.target.value }))}
+  1355→              />
+  1356→            </div>
+  1357→            <div className="space-y-2">
+  1358→              <Label htmlFor="newaddr-line2">Unit / line 2 (optional)</Label>
+  1359→              <Input
+  1360→                id="newaddr-line2"
+  1361→                maxLength={80}
+  1362→                value={addressForm.line2}
+  1363→                onChange={(e) => setAddressForm((f) => ({ ...f, line2: e.target.value }))}
+  1364→              />
+  1365→            </div>
+  1366→            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+  1367→              <div className="space-y-2">
+  1368→                <Label htmlFor="newaddr-city">City</Label>
+  1369→                <Input
+  1370→                  id="newaddr-city"
+  1371→                  maxLength={80}
+  1372→                  value={addressForm.city}
+  1373→                  onChange={(e) => setAddressForm((f) => ({ ...f, city: e.target.value }))}
+  1374→                />
+  1375→              </div>
+  1376→              <div className="space-y-2">
+  1377→                <Label htmlFor="newaddr-province">Province</Label>
+  1378→                <Input
+  1379→                  id="newaddr-province"
+  1380→                  maxLength={40}
+  1381→                  placeholder="ON"
+  1382→                  value={addressForm.province}
+  1383→                  onChange={(e) => setAddressForm((f) => ({ ...f, province: e.target.value }))}
+  1384→                />
+  1385→              </div>
+  1386→              <div className="space-y-2">
+  1387→                <Label htmlFor="newaddr-postal">Postal code</Label>
+  1388→                <Input
+  1389→                  id="newaddr-postal"
+  1390→                  maxLength={20}
+  1391→                  placeholder="M4C 1V2"
+  1392→                  value={addressForm.postal}
+  1393→                  onChange={(e) => setAddressForm((f) => ({ ...f, postal: e.target.value }))}
+  1394→                />
+  1395→              </div>
+  1396→            </div>
+  1397→            {addressFormError && (
+  1398→              <div
+  1399→                role="alert"
+  1400→                className="rounded-[10px] bg-[var(--status-danger-bg)] px-3.5 py-2.5 text-body-sm text-[var(--status-danger-fg)]"
+  1401→              >
+  1402→                {addressFormError}
+  1403→              </div>
+  1404→            )}
+  1405→            <DialogFooter className="gap-2">
+  1406→              <Button
+  1407→                type="button"
+  1408→                variant="outline"
+  1409→                onClick={() => setAddressDialogOpen(false)}
+  1410→                disabled={newAddressMutation.isPending}
+  1411→              >
+  1412→                Cancel
+  1413→              </Button>
+  1414→              <Button type="submit" className="gap-2" disabled={newAddressMutation.isPending}>
+  1415→                {newAddressMutation.isPending ? (
+  1416→                  <>
+  1417→                    <Loader2 className="size-4 animate-spin" aria-hidden /> Adding…
+  1418→                  </>
+  1419→                ) : (
+  1420→                  <>
+  1421→                    <Check className="size-4" aria-hidden /> Add address
+  1422→                  </>
+  1423→                )}
+  1424→              </Button>
+  1425→            </DialogFooter>
+  1426→          </form>
+  1427→        </DialogContent>
+  1428→      </Dialog>
+  1429→
+  1430→      {/* ── Load-draft confirm (cart would be replaced) ── */}
+  1431→      <AlertDialog open={pendingDraft !== null} onOpenChange={(o) => !o && setPendingDraft(null)}>
+  1432→        <AlertDialogContent>
+  1433→          <AlertDialogHeader>
+  1434→            <AlertDialogTitle>Continue with “{pendingDraft?.name}”?</AlertDialogTitle>
+  1435→            <AlertDialogDescription>
+  1436→              Items currently in your cart will be replaced by this draft — your delivery, reference
+  1437→              and per-line details come back with it. Nothing is submitted until you review it.
+  1438→            </AlertDialogDescription>
+  1439→          </AlertDialogHeader>
+  1440→          <AlertDialogFooter>
+  1441→            <AlertDialogCancel>Keep current cart</AlertDialogCancel>
+  1442→            <AlertDialogAction onClick={() => confirmLoadDraft()}>Load draft</AlertDialogAction>
+  1443→          </AlertDialogFooter>
+  1444→        </AlertDialogContent>
+  1445→      </AlertDialog>
+  1446→    </motion.div>
+  1447→  );
+  1448→
+  1449→  function confirmLoadDraft() {
+  1450→    if (pendingDraft) {
+  1451→      const name = pendingDraft.name;
+  1452→      loadDraftInto(pendingDraft);
+  1453→      toast({
+  1454→        title: `Draft “${name}” loaded`,
+  1455→        description: "Your cart now matches the draft — review it and submit when ready.",
+  1456→      });
+  1457→    }
+  1458→    setPendingDraft(null);
+  1459→  }
+  1460→}
+  1461→
+  1462→// ─── Local presentational bits ───────────────────────────────────────────────
+  1463→
+  1464→function SpecsToggle({
+  1465→  open,
+  1466→  filled,
+  1467→  onClick,
+  1468→}: {
+  1469→  open: boolean;
+  1470→  filled: boolean;
+  1471→  onClick?: () => void;
+  1472→}) {
+  1473→  return (
+  1474→    <button
+  1475→      type="button"
+  1476→      onClick={onClick}
+  1477→      aria-expanded={open}
+  1478→      className={cn(
+  1479→        "mt-1 inline-flex flex-wrap items-center gap-x-1.5 gap-y-0.5 rounded text-caption transition-colors",
+  1480→        open ? "text-foreground" : "text-muted-foreground hover:text-foreground",
+  1481→      )}
+  1482→    >
+  1483→      <SlidersHorizontal className="size-3.5" aria-hidden />
+  1484→      Specifications & note
+  1485→      {filled && (
+  1486→        <>
+  1487→          <span className="size-1.5 rounded-full bg-kraft-strong" aria-hidden />
+  1488→          <span className="sr-only">(details added)</span>
+  1489→        </>
+  1490→      )}
+  1491→    </button>
+  1492→  );
+  1493→}
+  1494→
+  1495→function LineExtrasPanel({
+  1496→  idPrefix,
+  1497→  extras,
+  1498→  onChange,
+  1499→}: {
+  1500→  idPrefix: string;
+  1501→  extras: LineExtras;
+  1502→  onChange: (next: LineExtras) => void;
+  1503→}) {
+  1504→  return (
+  1505→    <div className="space-y-4">
+  1506→      <div className="space-y-2">
+  1507→        <p className="text-micro text-muted-foreground">Specifications (optional)</p>
+  1508→        <p className="text-caption text-muted-foreground">
+  1509→          Anything specific about this line — we&apos;ll confirm details before production.
+  1510→        </p>
+  1511→        <SpecFieldsEditor
+  1512→          idPrefix={idPrefix}
+  1513→          specs={extras.specs}
+  1514→          onChange={(specs) => onChange({ ...extras, specs })}
+  1515→        />
+  1516→      </div>
+  1517→      <div className="max-w-sm space-y-1.5">
+  1518→        <Label htmlFor={`${idPrefix}-note`} className="text-caption text-muted-foreground">
+  1519→          Line note (optional)
+  1520→        </Label>
+  1521→        <Input
+  1522→          id={`${idPrefix}-note`}
+  1523→          maxLength={500}
+  1524→          placeholder="Anything about this specific line…"
+  1525→          value={extras.note}
+  1526→          onChange={(e) => onChange({ ...extras, note: e.target.value })}
+  1527→        />
+  1528→      </div>
+  1529→      <AttachmentPicker
+  1530→        idPrefix={idPrefix}
+  1531→        attachments={extras.attachments}
+  1532→        onChange={(attachments) => onChange({ ...extras, attachments })}
+  1533→      />
+  1534→    </div>
+  1535→  );
+  1536→}
+  1537→
+  1538→function CustomArtwork({ className }: { className?: string }) {
+  1539→  return (
+  1540→    <div
+  1541→      className={cn(
+  1542→        "flex size-10 shrink-0 items-center justify-center rounded-[10px] border border-dashed bg-surface-sunken text-muted-foreground",
+  1543→        className,
+  1544→      )}
+  1545→      aria-hidden
+  1546→    >
+  1547→      <Package className="size-4" />
+  1548→    </div>
+  1549→  );
+  1550→}
+  1551→
+  1552→function CartTotals({
+  1553→  subtotal,
+  1554→  tax,
+  1555→  total,
+  1556→  customCount,
+  1557→  className,
+  1558→}: {
+  1559→  subtotal: number;
+  1560→  tax: number;
+  1561→  total: number;
+  1562→  customCount: number;
+  1563→  className?: string;
+  1564→}) {
+  1565→  const rateLabel = useMemo(() => `${DEFAULT_TAX_RATE_BP / 100}%`, []);
+  1566→  return (
+  1567→    <div className={cn("ml-auto w-full max-w-xs space-y-1.5", className)}>
+  1568→      <div className="flex items-baseline justify-between text-body-sm">
+  1569→        <span className="text-muted-foreground">Subtotal</span>
+  1570→        <MoneyWithCode cents={subtotal} />
+  1571→      </div>
+  1572→      <div className="flex items-baseline justify-between text-body-sm">
+  1573→        <span className="text-muted-foreground">Estimated GST ({rateLabel})</span>
+  1574→        <MoneyWithCode cents={tax} />
+  1575→      </div>
+  1576→      <Separator className="my-2" />
+  1577→      <div className="flex items-baseline justify-between">
+  1578→        <span className="text-body-sm font-medium">Estimated total</span>
+  1579→        <MoneyWithCode cents={total} className="font-display text-title font-normal" />
+  1580→      </div>
+  1581→      <p className="pt-1 text-right text-caption text-pretty text-muted-foreground">
+  1582→        Taxes are estimated — final tax is computed on the confirmed order.
+  1583→        {customCount > 0 && " Custom requests are priced by Jeffery Group after review."}
+  1584→      </p>
+  1585→    </div>
+  1586→  );
+  1587→}
+  1588→

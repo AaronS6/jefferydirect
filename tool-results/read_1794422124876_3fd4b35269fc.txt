@@ -1,0 +1,1568 @@
+     1→# PROJECT MASTER PROMPT — CLIENTHUB
+     2→## Jeffery Group Ltd. | Premium B2B Customer Portal & Order Management Platform
+     3→
+     4→You are acting as a senior product designer, principal UX/UI designer, full-stack software architect, and experienced SaaS developer.
+     5→
+     6→Your assignment is to design and build **ClientHub**, a sophisticated, production-quality B2B customer portal for Jeffery Group Ltd., a packaging manufacturing and supply business.
+     7→
+     8→This is not a generic e-commerce website. It is not a simple landing page. It is not an ordinary admin dashboard.
+     9→
+    10→ClientHub is a complete digital customer experience platform that allows packaging customers to interact with Jeffery Group, browse their approved products, view their negotiated pricing, request quotations, submit orders, track deliveries, download documents, and manage their purchasing activities.
+    11→
+    12→The platform must also include a comprehensive internal administration system through which Jeffery Group can manage customers, products, pricing, quotations, orders, documents, and customer communications.
+    13→
+    14→I want you to build a genuinely impressive application.
+    15→
+    16→The finished product should look like it was designed by a highly experienced design team at a leading technology company. Think Apple-level attention to detail combined with the usability and sophistication of the best modern enterprise SaaS platforms.
+    17→
+    18→**Do not compromise on design quality, functionality, usability, or polish.**
+    19→
+    20→---
+    21→
+    22→# 1. PRODUCT VISION
+    23→
+    24→### What is ClientHub?
+    25→
+    26→ClientHub is the online customer portal for Jeffery Group Ltd.
+    27→
+    28→Its purpose is to modernize the way Jeffery Group communicates and conducts business with its existing packaging customers.
+    29→
+    30→Currently, business-to-business packaging orders can involve a considerable amount of manual communication:
+    31→
+    32→- Customers contact Jeffery Group to request product information.
+    33→- Customers ask for pricing.
+    34→- Customers email or message their order quantities.
+    35→- Employees manually confirm product availability.
+    36→- Customers request previous invoices and purchase orders.
+    37→- Customers ask for updates about their shipments.
+    38→- Employees have to look up historical orders.
+    39→- Customers request quotations for customized packaging.
+    40→
+    41→ClientHub should bring these interactions together into a single, centralized platform.
+    42→
+    43→Instead of customers having to contact Jeffery Group for every small request, they should be able to log in and access the information they need themselves.
+    44→
+    45→The platform should make purchasing from Jeffery Group feel professional, easy, transparent, and convenient.
+    46→
+    47→### The main objectives
+    48→
+    49→1. Provide customers with a professional online portal.
+    50→2. Simplify the purchasing and ordering process.
+    51→3. Reduce repetitive administrative work for employees.
+    52→4. Allow customers to quickly reorder previous products.
+    53→5. Centralize quotations, invoices, and business documents.
+    54→6. Improve transparency throughout the order fulfillment process.
+    55→7. Give Jeffery Group complete control over customer accounts and negotiated pricing.
+    56→8. Create a scalable foundation for future business automation.
+    57→
+    58→The application should serve as an extension of Jeffery Group's existing business operations.
+    59→
+    60→---
+    61→
+    62→# 2. BRAND IDENTITY AND DESIGN DIRECTION
+    63→
+    64→This is one of the most important requirements.
+    65→
+    66→I want ClientHub to look exceptional.
+    67→
+    68→Do not create an ordinary Bootstrap dashboard, generic template, or stereotypical AI-generated website.
+    69→
+    70→The design should feel carefully art-directed, premium, refined, and professionally engineered.
+    71→
+    72→### Overall aesthetic
+    73→
+    74→The visual direction should combine:
+    75→
+    76→- Apple's minimalist design philosophy.
+    77→- Modern enterprise SaaS interfaces.
+    78→- Premium fintech dashboard aesthetics.
+    79→- Exceptional typography and spacing.
+    80→- Clean, sophisticated navigation.
+    81→- Subtle interactions and animations.
+    82→- Elegant data presentation.
+    83→- Beautifully designed forms and tables.
+    84→
+    85→The overall feeling should be:
+    86→
+    87→**Modern. Clean. Beautiful. Premium. Sophisticated. Trustworthy. Effortless.**
+    88→
+    89→### Colour palette
+    90→
+    91→Use a restrained and cohesive colour system.
+    92→
+    93→Suggested direction:
+    94→
+    95→- Primary background: White or extremely light neutral grey.
+    96→- Secondary background: Soft off-white.
+    97→- Primary text: Deep charcoal or near-black.
+    98→- Secondary text: Muted grey.
+    99→- Primary accent: Sophisticated navy or deep blue.
+   100→- Secondary accent: Muted blue-grey.
+   101→- Success: Subtle green.
+   102→- Warning: Warm amber.
+   103→- Error: Restrained red.
+   104→- Borders: Very light neutral grey.
+   105→
+   106→Avoid unnecessarily bright colours.
+   107→
+   108→Avoid excessive gradients.
+   109→
+   110→Avoid making every card a different colour.
+   111→
+   112→Avoid strong shadows.
+   113→
+   114→Use colour purposefully to communicate meaning and hierarchy.
+   115→
+   116→### Typography
+   117→
+   118→Typography should look refined and professional.
+   119→
+   120→Use a modern sans-serif font such as:
+   121→
+   122→- Inter
+   123→- Geist
+   124→- SF Pro-inspired typography
+   125→- Other high-quality contemporary sans-serif alternatives.
+   126→
+   127→Establish a consistent typographic hierarchy.
+   128→
+   129→Page titles should be distinctive without being oversized.
+   130→
+   131→Section headings should be understated and elegant.
+   132→
+   133→Supporting text should be readable and appropriately muted.
+   134→
+   135→Numbers and financial figures should be easy to scan.
+   136→
+   137→### Spacing and layout
+   138→
+   139→Whitespace is important.
+   140→
+   141→Do not overcrowd the interface.
+   142→
+   143→Use consistent spacing throughout the application.
+   144→
+   145→Avoid placing too much information into a single viewport.
+   146→
+   147→Use a well-defined grid system.
+   148→
+   149→Cards should have consistent internal padding.
+   150→
+   151→Tables should be spacious enough to read comfortably.
+   152→
+   153→The interface should feel organized rather than compressed.
+   154→
+   155→### Cards and containers
+   156→
+   157→Use subtle borders, soft shadows where appropriate, and carefully considered corner radii.
+   158→
+   159→Cards should have a clean appearance.
+   160→
+   161→Avoid excessive rounded corners that make the platform look childish.
+   162→
+   163→Avoid excessive glassmorphism.
+   164→
+   165→Avoid unnecessary floating elements.
+   166→
+   167→Avoid decorative UI that does not serve a purpose.
+   168→
+   169→### Interaction design
+   170→
+   171→Every interaction should feel intentional.
+   172→
+   173→Implement:
+   174→
+   175→- Smooth hover transitions.
+   176→- Subtle button feedback.
+   177→- Elegant dropdown menus.
+   178→- Clean modal dialogs.
+   179→- Responsive navigation.
+   180→- Loading skeletons.
+   181→- Toast notifications.
+   182→- Smooth page transitions where appropriate.
+   183→- Well-designed confirmation dialogs.
+   184→- Consistent focus states.
+   185→
+   186→Animations should be subtle and fast.
+   187→
+   188→Do not introduce unnecessary animation that slows down the application.
+   189→
+   190→### Design quality reference
+   191→
+   192→Use the following products as design inspiration, not as templates to copy:
+   193→
+   194→- Apple.com
+   195→- Stripe Dashboard
+   196→- Linear
+   197→- Notion
+   198→- Vercel
+   199→- Shopify Admin
+   200→- Ramp
+   201→
+   202→The goal is to create a visual identity that feels original while meeting the quality standards of these products.
+   203→
+   204→---
+   205→
+   206→# 3. PLATFORM STRUCTURE
+   207→
+   208→ClientHub must contain two distinct experiences.
+   209→
+   210→### A. Customer Portal
+   211→
+   212→This is the interface used by Jeffery Group's customers.
+   213→
+   214→Customers should be able to:
+   215→
+   216→- Log in securely.
+   217→- View their personal dashboard.
+   218→- Browse their approved products.
+   219→- See their negotiated prices.
+   220→- Submit orders.
+   221→- Reorder previous purchases.
+   222→- Request quotations.
+   223→- Track orders.
+   224→- View invoices.
+   225→- Download documents.
+   226→- Update account information.
+   227→- Contact Jeffery Group.
+   228→
+   229→### B. Administration Portal
+   230→
+   231→This is the internal system used by Jeffery Group employees.
+   232→
+   233→Administrators should be able to:
+   234→
+   235→- Manage customer accounts.
+   236→- Manage products.
+   237→- Set customer-specific pricing.
+   238→- Receive and process orders.
+   239→- Manage quotation requests.
+   240→- Update order statuses.
+   241→- Upload invoices and other documents.
+   242→- View customer purchase histories.
+   243→- Send customer notifications.
+   244→- Manage internal users and permissions.
+   245→
+   246→These two experiences must be properly separated.
+   247→
+   248→Customers must never have access to internal administrative functions.
+   249→
+   250→---
+   251→
+   252→# 4. CUSTOMER AUTHENTICATION AND ACCOUNT MANAGEMENT
+   253→
+   254→Build a professional authentication experience.
+   255→
+   256→### Login page
+   257→
+   258→The login page should feel premium and simple.
+   259→
+   260→Include:
+   261→
+   262→- ClientHub branding.
+   263→- Jeffery Group identification.
+   264→- Email address field.
+   265→- Password field.
+   266→- Show/hide password control.
+   267→- Remember me option.
+   268→- Forgot password link.
+   269→- Sign-in button.
+   270→- Appropriate error messages.
+   271→
+   272→Do not make the login page unnecessarily complicated.
+   273→
+   274→### Registration
+   275→
+   276→The initial recommended business model is invitation-based customer registration.
+   277→
+   278→Customers should not immediately receive unrestricted access simply by creating an account.
+   279→
+   280→An administrator should be able to invite customers.
+   281→
+   282→Suggested workflow:
+   283→
+   284→1. Administrator creates a customer organization.
+   285→2. Administrator enters the customer's email address.
+   286→3. The platform sends an invitation.
+   287→4. The customer receives an invitation link.
+   288→5. The customer creates a password.
+   289→6. The customer joins their organization's account.
+   290→7. The customer receives access to approved products and information.
+   291→
+   292→Support multiple users belonging to the same customer organization.
+   293→
+   294→For example, a customer's purchasing manager and accounts payable employee may both need access to the same business account.
+   295→
+   296→Include appropriate user roles and permissions.
+   297→
+   298→### Account management
+   299→
+   300→Customers should have a settings page containing:
+   301→
+   302→- Business name.
+   303→- Contact person.
+   304→- Email address.
+   305→- Phone number.
+   306→- Billing address.
+   307→- Shipping addresses.
+   308→- Account details.
+   309→- Password management.
+   310→- Notification preferences.
+   311→
+   312→Important account information should be controlled by the appropriate administrator where necessary.
+   313→
+   314→---
+   315→
+   316→# 5. CUSTOMER DASHBOARD
+   317→
+   318→The customer dashboard is one of the most important screens in the entire application.
+   319→
+   320→It should provide an immediate overview of the customer's relationship with Jeffery Group.
+   321→
+   322→Design an elegant dashboard that prioritizes useful information.
+   323→
+   324→### Dashboard layout
+   325→
+   326→At the top:
+   327→
+   328→A personalized greeting.
+   329→
+   330→For example:
+   331→
+   332→"Good morning, [Customer Name]."
+   333→
+   334→Supporting text:
+   335→
+   336→"Here's an overview of your packaging orders and account activity."
+   337→
+   338→Include a prominent quick-action area.
+   339→
+   340→Possible actions:
+   341→
+   342→- Browse Products.
+   343→- Place an Order.
+   344→- Request a Quote.
+   345→- View All Orders.
+   346→
+   347→### Summary cards
+   348→
+   349→Display useful information such as:
+   350→
+   351→1. Active Orders.
+   352→2. Pending Quotations.
+   353→3. Outstanding Invoices.
+   354→4. Recent Orders.
+   355→
+   356→Cards should use refined typography and subtle visual indicators.
+   357→
+   358→Avoid oversized decorative icons.
+   359→
+   360→### Recent orders
+   361→
+   362→Display a clean table showing:
+   363→
+   364→- Order Number.
+   365→- Order Date.
+   366→- Product Summary.
+   367→- Quantity.
+   368→- Total Amount, if applicable.
+   369→- Current Status.
+   370→- Action.
+   371→
+   372→Users should be able to select an order to view its details.
+   373→
+   374→### Quick reorder
+   375→
+   376→Display frequently purchased products.
+   377→
+   378→Each item should include:
+   379→
+   380→- Product name.
+   381→- Product image.
+   382→- SKU.
+   383→- Previous purchase quantity.
+   384→- Last order date.
+   385→- Reorder action.
+   386→
+   387→### Recent activity
+   388→
+   389→Display a chronological activity feed.
+   390→
+   391→Examples:
+   392→
+   393→- Your order has been confirmed.
+   394→- Your quotation is ready.
+   395→- Your invoice has been uploaded.
+   396→- Your shipment has been dispatched.
+   397→
+   398→Use subtle status indicators.
+   399→
+   400→The dashboard should not feel cluttered.
+   401→
+   402→Prioritize the most important information.
+   403→
+   404→---
+   405→
+   406→# 6. PRODUCT CATALOGUE
+   407→
+   408→Build a sophisticated B2B packaging catalogue.
+   409→
+   410→Jeffery Group supplies packaging products, including corrugated cardboard products, pizza boxes, PET containers, and PP containers.
+   411→
+   412→The catalogue should be structured to accommodate these product categories and future product expansion.
+   413→
+   414→### Product categories
+   415→
+   416→Suggested categories:
+   417→
+   418→- Corrugated Packaging.
+   419→- Pizza Boxes.
+   420→- Food Packaging.
+   421→- PET Containers.
+   422→- PP Containers.
+   423→- Custom Printed Packaging.
+   424→- Other Packaging Products.
+   425→
+   426→Administrators must be able to create additional categories.
+   427→
+   428→### Product catalogue interface
+   429→
+   430→Customers should be able to:
+   431→
+   432→- Browse all approved products.
+   433→- Search products.
+   434→- Filter by category.
+   435→- Filter by size.
+   436→- Filter by material.
+   437→- Sort products.
+   438→- View product details.
+   439→- Add products to an order.
+   440→
+   441→The product catalogue should have a polished and attractive appearance.
+   442→
+   443→Use a responsive product grid.
+   444→
+   445→Product cards should contain:
+   446→
+   447→- Product image.
+   448→- Product name.
+   449→- SKU.
+   450→- Short description.
+   451→- Relevant specifications.
+   452→- Customer-specific price, where available.
+   453→- Availability or enquiry status.
+   454→- View Details button.
+   455→
+   456→Do not expose products that have not been approved for that customer.
+   457→
+   458→### Product detail page
+   459→
+   460→Every product should have its own detail page.
+   461→
+   462→Include:
+   463→
+   464→- Large product image.
+   465→- Product name.
+   466→- SKU.
+   467→- Full product description.
+   468→- Product specifications.
+   469→- Dimensions.
+   470→- Material.
+   471→- Colour.
+   472→- Printing options.
+   473→- Packaging configuration.
+   474→- Quantity per case.
+   475→- Minimum order quantity.
+   476→- Customer-specific pricing.
+   477→- Additional information.
+   478→
+   479→Include a quantity selector.
+   480→
+   481→Include a clear Add to Order button.
+   482→
+   483→If the product requires custom specifications or an individualized quotation, provide a Request a Quote action instead.
+   484→
+   485→### Product image requirements
+   486→
+   487→Images should be displayed consistently.
+   488→
+   489→Maintain appropriate aspect ratios.
+   490→
+   491→Use clean product imagery.
+   492→
+   493→When actual product photographs are unavailable, use professional placeholder images clearly identified as examples.
+   494→
+   495→Never fabricate actual product specifications.
+   496→
+   497→---
+   498→
+   499→# 7. CUSTOMER-SPECIFIC PRICING
+   500→
+   501→This is an essential part of the platform.
+   502→
+   503→Jeffery Group operates in a B2B environment where different customers may have different negotiated prices.
+   504→
+   505→The system must support individualized pricing.
+   506→
+   507→For example:
+   508→
+   509→- Customer A has an agreed price for Product X.
+   510→- Customer B has a different agreed price for Product X.
+   511→- Customer C may need to request a quotation instead of seeing a fixed price.
+   512→
+   513→The administrator must be able to configure pricing for each customer.
+   514→
+   515→### Pricing functionality
+   516→
+   517→Build:
+   518→
+   519→1. Default product pricing.
+   520→2. Customer-specific pricing.
+   521→3. Customer-specific product availability.
+   522→4. Minimum order quantities.
+   523→5. Volume-based pricing where configured.
+   524→6. Price effective dates.
+   525→7. Price adjustment history.
+   526→
+   527→Customer-specific pricing must override default pricing when applicable.
+   528→
+   529→Customers must only see prices assigned to their own accounts.
+   530→
+   531→Never expose one customer's negotiated prices to another customer.
+   532→
+   533→Do not allow customers to modify their own agreed pricing.
+   534→
+   535→### Important
+   536→
+   537→The application must store prices as proper numerical monetary values with an explicit currency.
+   538→
+   539→Support Canadian dollars initially, while allowing future expansion to other currencies.
+   540→
+   541→Use accurate decimal calculations.
+   542→
+   543→Never rely on floating-point arithmetic for financial calculations.
+   544→
+   545→---
+   546→
+   547→# 8. SHOPPING CART AND ORDER SUBMISSION
+   548→
+   549→Create a professional B2B ordering experience.
+   550→
+   551→This is not intended to operate exactly like a public consumer shopping website.
+   552→
+   553→It should feel like a purchasing portal designed for wholesale customers.
+   554→
+   555→### Shopping cart
+   556→
+   557→Customers should be able to:
+   558→
+   559→- Add multiple products.
+   560→- Modify quantities.
+   561→- Remove products.
+   562→- Review product specifications.
+   563→- View applicable pricing.
+   564→- View subtotal.
+   565→- Review applicable taxes where configured.
+   566→- Review order notes.
+   567→- Select a shipping address.
+   568→- Submit an order request.
+   569→
+   570→Quantities should respect product-specific minimum order quantities and packaging increments where configured.
+   571→
+   572→### Checkout process
+   573→
+   574→Keep the process simple.
+   575→
+   576→Suggested flow:
+   577→
+   578→Step 1: Review products.
+   579→
+   580→Step 2: Confirm quantities.
+   581→
+   582→Step 3: Confirm shipping address.
+   583→
+   584→Step 4: Add purchase order number and additional instructions.
+   585→
+   586→Step 5: Review the order.
+   587→
+   588→Step 6: Submit order request.
+   589→
+   590→### Order approval
+   591→
+   592→IMPORTANT:
+   593→
+   594→An order submission should initially be treated as an order request.
+   595→
+   596→It should not automatically become a confirmed order.
+   597→
+   598→Jeffery Group must be able to review:
+   599→
+   600→- Product availability.
+   601→- Quantities.
+   602→- Pricing.
+   603→- Delivery requirements.
+   604→- Any special instructions.
+   605→
+   606→An administrator should be able to approve, reject, or request changes.
+   607→
+   608→Only after the appropriate internal confirmation should the order become confirmed.
+   609→
+   610→Make this distinction very clear in the interface.
+   611→
+   612→Do not automatically promise inventory availability or delivery dates.
+   613→
+   614→The system should distinguish between requested, estimated, and confirmed information.
+   615→
+   616→---
+   617→
+   618→# 9. ONE-CLICK REORDERING
+   619→
+   620→This should be one of the strongest features of ClientHub.
+   621→
+   622→Many packaging customers purchase similar products repeatedly.
+   623→
+   624→Instead of entering all their product details every time, customers should be able to reorder from historical purchases.
+   625→
+   626→### How it works
+   627→
+   628→1. Customer opens Order History.
+   629→2. Customer selects an earlier order.
+   630→3. Customer clicks Reorder.
+   631→4. The original products are added to a new cart.
+   632→5. Quantities can be adjusted.
+   633→6. Current customer-specific pricing is retrieved.
+   634→7. Customer reviews the new order.
+   635→8. Customer submits it for approval.
+   636→
+   637→Important:
+   638→
+   639→Do not automatically reuse outdated historical prices.
+   640→
+   641→Retrieve the current approved price for the customer.
+   642→
+   643→If a product has been discontinued or is no longer available, clearly notify the customer.
+   644→
+   645→Preserve the original order as an unchanged historical record.
+   646→
+   647→---
+   648→
+   649→# 10. ORDER MANAGEMENT AND TRACKING
+   650→
+   651→Give customers a clear overview of their order progress.
+   652→
+   653→### Customer order history
+   654→
+   655→Create a professional table containing:
+   656→
+   657→- Order Number.
+   658→- Date Submitted.
+   659→- Product Summary.
+   660→- Quantity.
+   661→- Order Amount.
+   662→- Status.
+   663→- Estimated Delivery Date, if confirmed or appropriately labelled.
+   664→- View Order action.
+   665→
+   666→Include useful filtering:
+   667→
+   668→- All Orders.
+   669→- Pending.
+   670→- Confirmed.
+   671→- Processing.
+   672→- In Production.
+   673→- Ready for Shipment.
+   674→- Dispatched.
+   675→- Delivered.
+   676→- Cancelled.
+   677→
+   678→### Order statuses
+   679→
+   680→Support the following configurable status workflow:
+   681→
+   682→1. Order Submitted.
+   683→2. Under Review.
+   684→3. Awaiting Customer Confirmation.
+   685→4. Confirmed.
+   686→5. Processing.
+   687→6. In Production.
+   688→7. Ready for Shipment.
+   689→8. Dispatched.
+   690→9. Delivered.
+   691→10. Cancelled.
+   692→
+   693→The administrator should be able to update the status.
+   694→
+   695→Record every status change in an order activity history.
+   696→
+   697→### Order details page
+   698→
+   699→Every order must have a detailed page.
+   700→
+   701→Include:
+   702→
+   703→- Order number.
+   704→- Customer information.
+   705→- Submission date.
+   706→- Products.
+   707→- Quantities.
+   708→- Unit pricing.
+   709→- Order subtotal.
+   710→- Tax, where applicable.
+   711→- Total.
+   712→- Shipping address.
+   713→- Purchase order reference.
+   714→- Special instructions.
+   715→- Current status.
+   716→- Order status timeline.
+   717→- Related documents.
+   718→- Communication history.
+   719→
+   720→### Order tracking timeline
+   721→
+   722→Use a refined vertical or horizontal progress timeline.
+   723→
+   724→Clearly identify:
+   725→
+   726→- Completed steps.
+   727→- Current step.
+   728→- Upcoming steps.
+   729→
+   730→Include dates and relevant notes.
+   731→
+   732→Do not display invented shipment tracking information.
+   733→
+   734→If a shipment tracking number exists, display it.
+   735→
+   736→If it does not exist, do not fabricate one.
+   737→
+   738→---
+   739→
+   740→# 11. QUOTATION CENTRE
+   741→
+   742→Build a complete quotation request and management system.
+   743→
+   744→Customers frequently need pricing for customized products or larger orders.
+   745→
+   746→They should be able to request quotations directly through ClientHub.
+   747→
+   748→### Customer quotation form
+   749→
+   750→Include fields for:
+   751→
+   752→- Product category.
+   753→- Product name, if known.
+   754→- Dimensions.
+   755→- Material.
+   756→- Product colour.
+   757→- Printing requirements.
+   758→- Quantity.
+   759→- Expected delivery date.
+   760→- Shipping destination.
+   761→- Special specifications.
+   762→- Additional comments.
+   763→- Artwork and attachment uploads.
+   764→
+   765→Make the form easy to complete.
+   766→
+   767→Use logical sections and conditional fields where appropriate.
+   768→
+   769→### Quotation management
+   770→
+   771→Administrators should receive new quotation requests in their dashboard.
+   772→
+   773→They should be able to:
+   774→
+   775→- Review customer requirements.
+   776→- Add products.
+   777→- Enter quantities.
+   778→- Set unit prices.
+   779→- Enter one-time costs or setup fees.
+   780→- Include freight or additional costs.
+   781→- Define quotation expiry dates.
+   782→- Add terms and conditions.
+   783→- Generate professional PDF quotations.
+   784→- Send the quotation to the customer.
+   785→
+   786→### Customer quotation page
+   787→
+   788→Customers should be able to:
+   789→
+   790→- View quotations.
+   791→- Download PDF quotations.
+   792→- Accept quotations.
+   793→- Reject quotations.
+   794→- Request revisions.
+   795→- Review quotation expiry dates.
+   796→
+   797→An accepted quotation should be capable of being converted into an order.
+   798→
+   799→Maintain a complete history of revisions and approvals.
+   800→
+   801→Never let an old quotation silently overwrite a newly issued quotation.
+   802→
+   803→---
+   804→
+   805→# 12. INVOICE AND DOCUMENT CENTRE
+   806→
+   807→Every customer should have a private document centre.
+   808→
+   809→Organize documents in a clean, professional interface.
+   810→
+   811→### Document categories
+   812→
+   813→- Invoices.
+   814→- Purchase Orders.
+   815→- Quotations.
+   816→- Statements of Account.
+   817→- Product Specifications.
+   818→- Delivery Receipts.
+   819→- Other Documents.
+   820→
+   821→### Customer capabilities
+   822→
+   823→Customers should be able to:
+   824→
+   825→- View their documents.
+   826→- Search documents.
+   827→- Filter by document category.
+   828→- Filter by date.
+   829→- Preview supported documents.
+   830→- Download PDFs.
+   831→- Access related orders.
+   832→
+   833→### Administrator capabilities
+   834→
+   835→Administrators should be able to:
+   836→
+   837→- Upload documents.
+   838→- Assign documents to customers.
+   839→- Associate documents with orders.
+   840→- Categorize documents.
+   841→- Add document descriptions.
+   842→- Replace files with a version history where appropriate.
+   843→- Remove documents according to permissions.
+   844→
+   845→Document privacy is critical.
+   846→
+   847→A customer must never be able to access another customer's invoices or documents.
+   848→
+   849→Use secure storage and authorization checks.
+   850→
+   851→---
+   852→
+   853→# 13. ADMINISTRATION DASHBOARD
+   854→
+   855→Create a completely separate administration experience.
+   856→
+   857→This dashboard will be used by Jeffery Group employees.
+   858→
+   859→It should have a professional, information-dense but elegant layout.
+   860→
+   861→It must make managing the platform easy.
+   862→
+   863→### Admin overview
+   864→
+   865→The overview dashboard should include:
+   866→
+   867→- Total active customers.
+   868→- New order requests.
+   869→- Pending quotations.
+   870→- Confirmed orders.
+   871→- Orders in production.
+   872→- Outstanding invoices, if invoice information is available.
+   873→- Recent customer activity.
+   874→
+   875→Include a recent orders table.
+   876→
+   877→Include pending tasks.
+   878→
+   879→Include a recent activity feed.
+   880→
+   881→Include useful charts where real data is available.
+   882→
+   883→Do not create meaningless charts just to fill space.
+   884→
+   885→### Admin navigation
+   886→
+   887→Create a sidebar containing:
+   888→
+   889→1. Overview.
+   890→2. Orders.
+   891→3. Quotations.
+   892→4. Customers.
+   893→5. Products.
+   894→6. Pricing.
+   895→7. Documents.
+   896→8. Notifications.
+   897→9. Users and Permissions.
+   898→10. Settings.
+   899→
+   900→Navigation should be consistent.
+   901→
+   902→Highlight the current section.
+   903→
+   904→Support a collapsible sidebar.
+   905→
+   906→On mobile, use a well-designed navigation drawer.
+   907→
+   908→---
+   909→
+   910→# 14. CUSTOMER MANAGEMENT
+   911→
+   912→Administrators should have a dedicated customer management section.
+   913→
+   914→### Customer directory
+   915→
+   916→Display:
+   917→
+   918→- Business name.
+   919→- Customer ID.
+   920→- Primary contact.
+   921→- Email.
+   922→- Phone number.
+   923→- Account status.
+   924→- Number of orders.
+   925→- Most recent order.
+   926→- Registration date.
+   927→
+   928→Provide search and filtering.
+   929→
+   930→### Customer profile
+   931→
+   932→Each customer should have an individual management page.
+   933→
+   934→Include:
+   935→
+   936→- Company information.
+   937→- Contacts.
+   938→- Billing details.
+   939→- Shipping addresses.
+   940→- Assigned products.
+   941→- Customer-specific prices.
+   942→- Order history.
+   943→- Quotations.
+   944→- Invoices.
+   945→- Documents.
+   946→- Internal notes.
+   947→- Account activity.
+   948→
+   949→### Customer account controls
+   950→
+   951→Administrators should be able to:
+   952→
+   953→- Create customer accounts.
+   954→- Invite new customer users.
+   955→- Edit customer information.
+   956→- Activate or deactivate accounts.
+   957→- Assign users to organizations.
+   958→- Control product visibility.
+   959→- Configure pricing.
+   960→- Review account history.
+   961→
+   962→Support multiple individual users under one customer company.
+   963→
+   964→Internal notes must never be visible to customers.
+   965→
+   966→---
+   967→
+   968→# 15. PRODUCT MANAGEMENT
+   969→
+   970→Create a powerful but simple product administration system.
+   971→
+   972→Administrators should be able to:
+   973→
+   974→- Create products.
+   975→- Edit products.
+   976→- Archive products.
+   977→- Upload product images.
+   978→- Assign product categories.
+   979→- Manage SKUs.
+   980→- Enter product descriptions.
+   981→- Define specifications.
+   982→- Set default pricing.
+   983→- Set minimum order quantities.
+   984→- Configure units of measurement.
+   985→- Configure packaging increments.
+   986→- Control product visibility.
+   987→- Assign products to individual customers.
+   988→
+   989→### Packaging specifications
+   990→
+   991→Allow flexible specifications because packaging products vary significantly.
+   992→
+   993→Potential attributes:
+   994→
+   995→- Length.
+   996→- Width.
+   997→- Height.
+   998→- Dimensions and units.
+   999→- Material.
+  1000→- Thickness.
+  1001→- Colour.
+  1002→- Printing colours.
+  1003→- Product weight.
+  1004→- Quantity per case.
+  1005→- Cases per pallet.
+  1006→- Manufacturing specifications.
+  1007→- Custom artwork.
+  1008→
+  1009→Not every product needs every field.
+  1010→
+  1011→Use product-specific attributes where appropriate.
+  1012→
+  1013→Do not force irrelevant specifications onto customers.
+  1014→
+  1015→---
+  1016→
+  1017→# 16. NOTIFICATIONS AND COMMUNICATIONS
+  1018→
+  1019→Implement a centralized notification system.
+  1020→
+  1021→### Email notifications
+  1022→
+  1023→Customers should receive appropriate notifications when:
+  1024→
+  1025→- Their account invitation is issued.
+  1026→- Their order is received.
+  1027→- Their order is confirmed.
+  1028→- Their order status changes.
+  1029→- Their quotation is available.
+  1030→- Their quotation is approaching expiry.
+  1031→- A new invoice is uploaded.
+  1032→- A new document is available.
+  1033→
+  1034→### In-app notifications
+  1035→
+  1036→Create a notification centre inside the customer portal.
+  1037→
+  1038→Use:
+  1039→
+  1040→- Unread indicators.
+  1041→- Notification timestamps.
+  1042→- Clear descriptions.
+  1043→- Relevant links.
+  1044→- Mark as read functionality.
+  1045→- Mark all as read functionality.
+  1046→
+  1047→### Administrative notifications
+  1048→
+  1049→Administrators should be notified when:
+  1050→
+  1051→- A customer submits an order.
+  1052→- A customer requests a quotation.
+  1053→- A customer accepts a quotation.
+  1054→- An important document is requested.
+  1055→- A customer sends a message.
+  1056→
+  1057→Support configurable notification preferences.
+  1058→
+  1059→Avoid sending excessive duplicate notifications.
+  1060→
+  1061→---
+  1062→
+  1063→# 17. CUSTOMER SUPPORT AND CONTACT
+  1064→
+  1065→Build a straightforward customer communication section.
+  1066→
+  1067→Customers should be able to contact Jeffery Group regarding:
+  1068→
+  1069→- Existing orders.
+  1070→- Products.
+  1071→- Quotations.
+  1072→- Invoices.
+  1073→- Delivery arrangements.
+  1074→- General inquiries.
+  1075→
+  1076→Whenever possible, associate messages with a specific order or quotation.
+  1077→
+  1078→Provide a clear contact experience.
+  1079→
+  1080→Do not build a complicated live-chat system for the initial version unless it is genuinely functional.
+  1081→
+  1082→A reliable inquiry and response system is more important.
+  1083→
+  1084→---
+  1085→
+  1086→# 18. FUTURE AI CAPABILITIES
+  1087→
+  1088→Design the application so AI features can be integrated in the future.
+  1089→
+  1090→Do not make AI gimmicky.
+  1091→
+  1092→AI should solve actual business problems.
+  1093→
+  1094→Potential future features include:
+  1095→
+  1096→### AI ordering assistant
+  1097→
+  1098→Customers could write:
+  1099→
+  1100→"I'd like to reorder the same pizza boxes as last month, but increase the quantity by 20%."
+  1101→
+  1102→The assistant could identify the previous order, prepare a draft cart, and ask for confirmation.
+  1103→
+  1104→### AI document processing
+  1105→
+  1106→Upload a purchase order PDF.
+  1107→
+  1108→AI extracts:
+  1109→
+  1110→- Product names.
+  1111→- SKUs.
+  1112→- Quantities.
+  1113→- Required dates.
+  1114→- Customer information.
+  1115→- Additional instructions.
+  1116→
+  1117→The information can then be reviewed before being turned into an order request.
+  1118→
+  1119→### AI customer service assistant
+  1120→
+  1121→Customers could ask:
+  1122→
+  1123→- "What's the status of my order?"
+  1124→- "Can I see my previous invoices?"
+  1125→- "What products did I order last month?"
+  1126→- "How do I reorder this product?"
+  1127→
+  1128→The assistant should retrieve information from authorized account records.
+  1129→
+  1130→### AI administrative assistant
+  1131→
+  1132→Administrators could eventually ask:
+  1133→
+  1134→- "Show all outstanding quotation requests."
+  1135→- "Which customers have not ordered recently?"
+  1136→- "Which orders are awaiting approval?"
+  1137→- "Show the orders currently in production."
+  1138→
+  1139→AI must only answer using authorized and verified information.
+  1140→
+  1141→Never make up prices, quantities, delivery dates, or financial figures.
+  1142→
+  1143→These are future enhancements. The core ordering and administrative systems must work without AI.
+  1144→
+  1145→---
+  1146→
+  1147→# 19. RESPONSIVE DESIGN
+  1148→
+  1149→ClientHub must be fully responsive.
+  1150→
+  1151→It must look excellent on:
+  1152→
+  1153→- Desktop computers.
+  1154→- Laptops.
+  1155→- Tablets.
+  1156→- iPhones.
+  1157→- Android phones.
+  1158→
+  1159→Do not simply shrink the desktop layout to fit mobile.
+  1160→
+  1161→Design appropriate mobile experiences.
+  1162→
+  1163→### Desktop
+  1164→
+  1165→Use an elegant sidebar and spacious working area.
+  1166→
+  1167→### Tablet
+  1168→
+  1169→Adjust the navigation and layout intelligently.
+  1170→
+  1171→### Mobile
+  1172→
+  1173→Use a mobile-friendly navigation structure.
+  1174→
+  1175→Tables should have appropriate responsive alternatives.
+  1176→
+  1177→Forms should be easy to complete on a phone.
+  1178→
+  1179→Buttons should have comfortable touch targets.
+  1180→
+  1181→Product cards should adapt to available width.
+  1182→
+  1183→All critical features must remain accessible.
+  1184→
+  1185→---
+  1186→
+  1187→# 20. TECHNOLOGY AND SOFTWARE ARCHITECTURE
+  1188→
+  1189→Build a modern, maintainable application.
+  1190→
+  1191→Preferred technology stack:
+  1192→
+  1193→**Frontend**
+  1194→- Next.js.
+  1195→- React.
+  1196→- TypeScript.
+  1197→- Tailwind CSS.
+  1198→- shadcn/ui.
+  1199→- Lucide icons.
+  1200→
+  1201→**Backend**
+  1202→- Supabase.
+  1203→- PostgreSQL.
+  1204→- Supabase Authentication.
+  1205→- Supabase Storage.
+  1206→
+  1207→**Hosting**
+  1208→- Vercel or another suitable deployment environment.
+  1209→
+  1210→**Email**
+  1211→- Resend or Brevo.
+  1212→
+  1213→If the existing project already uses a working technology stack, inspect it before making changes. Preserve useful existing functionality and avoid unnecessary migrations.
+  1214→
+  1215→### Database architecture
+  1216→
+  1217→Design a proper relational database.
+  1218→
+  1219→Suggested tables:
+  1220→
+  1221→- profiles
+  1222→- organizations
+  1223→- organization_members
+  1224→- invitations
+  1225→- products
+  1226→- product_categories
+  1227→- product_images
+  1228→- customer_product_access
+  1229→- customer_product_prices
+  1230→- orders
+  1231→- order_items
+  1232→- order_status_history
+  1233→- quotations
+  1234→- quotation_items
+  1235→- quotation_revisions
+  1236→- documents
+  1237→- notifications
+  1238→- customer_messages
+  1239→- audit_logs
+  1240→
+  1241→Include appropriate:
+  1242→
+  1243→- Primary keys.
+  1244→- Foreign keys.
+  1245→- Indexes.
+  1246→- Timestamps.
+  1247→- Relationships.
+  1248→- Validation rules.
+  1249→
+  1250→Use UUIDs where appropriate.
+  1251→
+  1252→Avoid duplicating unnecessary data.
+  1253→
+  1254→Preserve historical order and quotation information.
+  1255→
+  1256→### Security requirements
+  1257→
+  1258→This platform will contain commercial customer information.
+  1259→
+  1260→Security is not optional.
+  1261→
+  1262→Implement:
+  1263→
+  1264→- Secure authentication.
+  1265→- Proper authorization.
+  1266→- Role-based permissions.
+  1267→- Supabase Row Level Security.
+  1268→- Organization-level data isolation.
+  1269→- Private document storage.
+  1270→- Secure file access.
+  1271→- Input validation.
+  1272→- Server-side authorization checks.
+  1273→- Safe handling of user uploads.
+  1274→- Audit logging for important administrative actions.
+  1275→
+  1276→Never rely exclusively on hiding buttons or frontend navigation to protect data.
+  1277→
+  1278→All permissions must be enforced by the backend.
+  1279→
+  1280→A customer must not be able to change a URL or API request to access another customer's information.
+  1281→
+  1282→Never put private API keys or service-role credentials in client-side code.
+  1283→
+  1284→---
+  1285→
+  1286→# 21. USER EXPERIENCE REQUIREMENTS
+  1287→
+  1288→The platform must feel intuitive even for people who are not particularly familiar with technology.
+  1289→
+  1290→Prioritize clarity.
+  1291→
+  1292→Do not make users think unnecessarily.
+  1293→
+  1294→Every page should have a clear purpose.
+  1295→
+  1296→Every action should have an understandable result.
+  1297→
+  1298→Use descriptive labels.
+  1299→
+  1300→Avoid technical jargon in customer-facing interfaces.
+  1301→
+  1302→For forms:
+  1303→
+  1304→- Group related fields.
+  1305→- Use clear labels.
+  1306→- Provide useful validation.
+  1307→- Explain required fields.
+  1308→- Preserve entered data when possible.
+  1309→- Provide helpful error messages.
+  1310→
+  1311→For destructive actions:
+  1312→
+  1313→- Require confirmation.
+  1314→- Clearly communicate consequences.
+  1315→
+  1316→For loading states:
+  1317→
+  1318→- Use skeleton loaders.
+  1319→- Avoid sudden layout shifts.
+  1320→
+  1321→For empty states:
+  1322→
+  1323→- Explain what the user is seeing.
+  1324→- Provide an appropriate next action.
+  1325→
+  1326→For errors:
+  1327→
+  1328→- Explain what went wrong.
+  1329→- Offer a way to recover.
+  1330→
+  1331→Do not leave pages with generic "Coming Soon" messages for features that are supposed to be implemented.
+  1332→
+  1333→---
+  1334→
+  1335→# 22. EXACT VISUAL QUALITY EXPECTATIONS
+  1336→
+  1337→I want you to pay exceptional attention to visual execution.
+  1338→
+  1339→The application should not look like a typical AI-generated dashboard.
+  1340→
+  1341→Common problems that must be avoided:
+  1342→
+  1343→- Too many cards.
+  1344→- Excessive rounded corners.
+  1345→- Random gradients.
+  1346→- Oversized icons.
+  1347→- Poor typography.
+  1348→- Uneven spacing.
+  1349→- Inconsistent colours.
+  1350→- Too much information on one page.
+  1351→- Generic navigation.
+  1352→- Unnecessary decorative graphics.
+  1353→- Repetitive layouts.
+  1354→- Giant headings that waste space.
+  1355→- Buttons that look unfinished.
+  1356→- Tables that feel cramped.
+  1357→- Poorly designed mobile pages.
+  1358→- Fake charts.
+  1359→- Inconsistent icon sizes.
+  1360→
+  1361→### What I want instead
+  1362→
+  1363→I want a beautifully composed interface.
+  1364→
+  1365→Think about:
+  1366→
+  1367→- Perfect alignment.
+  1368→- Consistent spacing.
+  1369→- Excellent visual hierarchy.
+  1370→- Thoughtful information density.
+  1371→- Clean navigation.
+  1372→- Refined buttons.
+  1373→- Beautiful form inputs.
+  1374→- Excellent table design.
+  1375→- Professional status indicators.
+  1376→- Subtle motion.
+  1377→- Excellent empty states.
+  1378→- Beautiful typography.
+  1379→- Consistent visual patterns.
+  1380→
+  1381→The design should look as good as a premium commercial SaaS product.
+  1382→
+  1383→Do not sacrifice usability in pursuit of visual effects.
+  1384→
+  1385→---
+  1386→
+  1387→# 23. IMPLEMENTATION REQUIREMENTS
+  1388→
+  1389→I want you to actually build the application.
+  1390→
+  1391→Do not simply produce a design description.
+  1392→
+  1393→Do not stop after generating a landing page.
+  1394→
+  1395→Do not create a static mockup with buttons that do nothing.
+  1396→
+  1397→Build the working application with its major pages, reusable components, database integration, authentication, and real interactions.
+  1398→
+  1399→### Implementation priorities
+  1400→
+  1401→Priority 1:
+  1402→- Authentication.
+  1403→- Customer organizations.
+  1404→- Customer dashboard.
+  1405→- Product catalogue.
+  1406→- Customer-specific pricing.
+  1407→
+  1408→Priority 2:
+  1409→- Shopping cart.
+  1410→- Order submission.
+  1411→- Order history.
+  1412→- Order details.
+  1413→- Admin order management.
+  1414→
+  1415→Priority 3:
+  1416→- Customer management.
+  1417→- Quotation system.
+  1418→- Document centre.
+  1419→- Notifications.
+  1420→
+  1421→Priority 4:
+  1422→- Advanced administration.
+  1423→- Reporting.
+  1424→- AI integration preparation.
+  1425→
+  1426→### Important development instructions
+  1427→
+  1428→Before coding:
+  1429→
+  1430→1. Inspect the existing project structure.
+  1431→2. Identify the installed dependencies.
+  1432→3. Understand the existing database configuration.
+  1433→4. Identify reusable components.
+  1434→5. Determine which features are already implemented.
+  1435→6. Establish an implementation plan.
+  1436→
+  1437→Then proceed to development.
+  1438→
+  1439→Do not unnecessarily rewrite working code.
+  1440→
+  1441→Use reusable components.
+  1442→
+  1443→Keep the code organized and maintainable.
+  1444→
+  1445→Separate business logic from UI components.
+  1446→
+  1447→Use proper TypeScript types.
+  1448→
+  1449→Validate user input on the server.
+  1450→
+  1451→Implement appropriate error handling.
+  1452→
+  1453→Ensure database operations are secure.
+  1454→
+  1455→### Demo data
+  1456→
+  1457→Where actual business data is unavailable, use clearly identified demonstration data.
+  1458→
+  1459→Create realistic sample packaging products, orders, customers, and quotations to make the interface easy to evaluate.
+  1460→
+  1461→Never present invented demo revenue, inventory, customer records, or financial figures as real Jeffery Group business data.
+  1462→
+  1463→Make it possible to replace all demo data with actual business records.
+  1464→
+  1465→Do not hardcode business data throughout the frontend.
+  1466→
+  1467→---
+  1468→
+  1469→# 24. FINAL QUALITY ASSURANCE
+  1470→
+  1471→Before considering the application complete, test the entire experience.
+  1472→
+  1473→### Customer testing
+  1474→
+  1475→- Can a customer log in?
+  1476→- Can a customer view their dashboard?
+  1477→- Can they browse approved products?
+  1478→- Can they see their own pricing?
+  1479→- Can they add products to a cart?
+  1480→- Can they submit an order request?
+  1481→- Can they view order history?
+  1482→- Can they reorder an old purchase?
+  1483→- Can they request a quotation?
+  1484→- Can they access their own documents?
+  1485→- Can they receive notifications?
+  1486→
+  1487→### Administrator testing
+  1488→
+  1489→- Can an administrator log in?
+  1490→- Can they create a customer?
+  1491→- Can they invite a customer user?
+  1492→- Can they create products?
+  1493→- Can they set individual customer pricing?
+  1494→- Can they approve an order?
+  1495→- Can they update order statuses?
+  1496→- Can they create a quotation?
+  1497→- Can they upload documents?
+  1498→- Can they send notifications?
+  1499→- Can they manage access permissions?
+  1500→
+  1501→### Security testing
+  1502→
+  1503→- Can Customer A access Customer B's documents?
+  1504→- Can Customer A view Customer B's prices?
+  1505→- Can a customer access administrative routes?
+  1506→- Can unauthorized users modify orders?
+  1507→- Are private files protected?
+  1508→- Are authorization rules enforced server-side?
+  1509→
+  1510→All these scenarios must be tested.
+  1511→
+  1512→Fix errors rather than simply documenting them.
+  1513→
+  1514→### Visual quality testing
+  1515→
+  1516→Review the application at desktop, tablet, and mobile sizes.
+  1517→
+  1518→Check:
+  1519→
+  1520→- Spacing.
+  1521→- Alignment.
+  1522→- Typography.
+  1523→- Colour consistency.
+  1524→- Responsiveness.
+  1525→- Navigation.
+  1526→- Button states.
+  1527→- Form usability.
+  1528→- Table readability.
+  1529→- Loading states.
+  1530→- Empty states.
+  1531→
+  1532→Do not consider an unfinished or inconsistent mobile experience acceptable.
+  1533→
+  1534→---
+  1535→
+  1536→# 25. THE FINAL VISION
+  1537→
+  1538→I want ClientHub to become the primary online interface between Jeffery Group and its business customers.
+  1539→
+  1540→When a customer receives their login credentials, they should feel that they are dealing with an established, modern, sophisticated packaging supplier.
+  1541→
+  1542→When they log in, everything they need should be available in one place.
+  1543→
+  1544→They should be able to find their products, understand their pricing, place orders, request quotations, follow order progress, and retrieve their documents without repeatedly contacting employees.
+  1545→
+  1546→At the same time, Jeffery Group should have a powerful internal system that makes customer management and order processing much easier.
+  1547→
+  1548→The application should be scalable enough to accommodate additional customers, products, employees, and business processes in the future.
+  1549→
+  1550→### Final design instruction
+  1551→
+  1552→Please take the visual quality of this project extremely seriously.
+  1553→
+  1554→I do not want an average-looking website.
+  1555→
+  1556→I want an exceptionally polished, beautiful, modern, premium, and sophisticated product.
+  1557→
+  1558→Every screen should feel intentional.
+  1559→
+  1560→Every component should look professionally designed.
+  1561→
+  1562→Every interaction should feel smooth.
+  1563→
+  1564→The finished product should be something that a company could confidently present to its largest business customers.
+  1565→
+  1566→**Build ClientHub as a real, functional, premium B2B SaaS platform — not just a website that looks attractive in screenshots.**
+  1567→
+  1568→Prioritize product quality, visual excellence, usability, reliability, and security throughout the entire development process.

@@ -1,0 +1,1073 @@
+     1→     1→"use client";
+     2→     2→
+     3→     3→// Administration — customer profile: overview, contacts & addresses, product
+     4→     4→// pricing matrix, orders, quotations, documents and internal notes.
+     5→     5→
+     6→     6→import { useState } from "react";
+     7→     7→import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+     8→     8→import {
+     9→     9→  Ban,
+    10→    10→  CheckCircle2,
+    11→    11→  FileText,
+    12→    12→  Lock,
+    13→    13→  MapPin,
+    14→    14→  PencilLine,
+    15→    15→  Phone,
+    16→    16→  Plus,
+    17→    17→  ReceiptText,
+    18→    18→  Save,
+    19→    19→  UserPlus,
+    20→    20→  Users,
+    21→    21→} from "lucide-react";
+    22→    22→import { Button } from "@/components/ui/button";
+    23→    23→import { Input } from "@/components/ui/input";
+    24→    24→import { Label } from "@/components/ui/label";
+    25→    25→import { Textarea } from "@/components/ui/textarea";
+    26→    26→import { Switch } from "@/components/ui/switch";
+    27→    27→import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+    28→    28→import {
+    29→    29→  AlertDialog,
+    30→    30→  AlertDialogAction,
+    31→    31→  AlertDialogCancel,
+    32→    32→  AlertDialogContent,
+    33→    33→  AlertDialogDescription,
+    34→    34→  AlertDialogFooter,
+    35→    35→  AlertDialogHeader,
+    36→    36→  AlertDialogTitle,
+    37→    37→} from "@/components/ui/alert-dialog";
+    38→    38→import {
+    39→    39→  Dialog,
+    40→    40→  DialogContent,
+    41→    41→  DialogFooter,
+    42→    42→  DialogHeader,
+    43→    43→  DialogTitle,
+    44→    44→} from "@/components/ui/dialog";
+    45→    45→import {
+    46→    46→  Select,
+    47→    47→  SelectContent,
+    48→    48→  SelectItem,
+    49→    49→  SelectTrigger,
+    50→    50→  SelectValue,
+    51→    51→} from "@/components/ui/select";
+    52→    52→import { Table, TableBody, TableHeader, TableRow } from "@/components/ui/table";
+    53→    53→import { PageHeader } from "@/components/shared/page-header";
+    54→    54→import {
+    55→    55→  OrgRoleBadge,
+    56→    56→  StatusBadge,
+    57→    57→  UserStatusBadge,
+    58→    58→  DocumentCategoryBadge,
+    59→    59→} from "@/components/shared/status-badge";
+    60→    60→import { Money } from "@/components/shared/money";
+    61→    61→import { KpiCell, KpiStrip } from "@/components/shared/kpi-card";
+    62→    62→import { EmptyState } from "@/components/shared/empty-state";
+    63→    63→import { PricingMatrix } from "./pricing-matrix";
+    64→    64→import { api } from "@/lib/api-client";
+    65→    65→import { formatDate, timeAgo } from "@/lib/date";
+    66→    66→import {
+    67→    67→  ORG_ROLE_DESCRIPTIONS,
+    68→    68→  ORG_ROLE_LABELS,
+    69→    69→  ORG_ROLES,
+    70→    70→} from "@/lib/constants";
+    71→    71→import { useAppStore } from "@/store/app-store";
+    72→    72→import { toast } from "@/hooks/use-toast";
+    73→    73→import type { CustomerProfile, OrgPreferences } from "@/types";
+    74→    74→import { DefRow, GroupLabel, InlineError, RowsSkeleton, SectionCard, Td, Th, TempPasswordPanel, ViewEnter, dashed } from "./admin-ui";
+    75→    75→import { cn } from "@/lib/utils";
+    76→    76→
+    77→    77→export function AdminCustomerDetailView({ customerId }: { customerId: string }) {
+    78→    78→  const back = useAppStore((s) => s.back);
+    79→    79→  const navigate = useAppStore((s) => s.navigate);
+    80→    80→  const queryClient = useQueryClient();
+    81→    81→  const [editOpen, setEditOpen] = useState(false);
+    82→    82→  const [inviteOpen, setInviteOpen] = useState(false);
+    83→    83→  const [suspendOpen, setSuspendOpen] = useState(false);
+    84→    84→
+    85→    85→  const { data: profile, isLoading, isError, error } = useQuery({
+    86→    86→    queryKey: ["admin", "customer", customerId],
+    87→    87→    queryFn: () => api.get<CustomerProfile>(`/api/admin/customers/${customerId}`),
+    88→    88→  });
+    89→    89→
+    90→    90→  function invalidate() {
+    91→    91→    queryClient.invalidateQueries({ queryKey: ["admin", "customer", customerId] });
+    92→    92→    queryClient.invalidateQueries({ queryKey: ["admin", "customers"] });
+    93→    93→    queryClient.invalidateQueries({ queryKey: ["admin", "overview"] });
+    94→    94→  }
+    95→    95→
+    96→    96→  const statusMutation = useMutation({
+    97→    97→    mutationFn: (status: "ACTIVE" | "SUSPENDED") =>
+    98→    98→      api.put<{ ok: boolean }>(`/api/admin/customers/${customerId}`, { status }),
+    99→    99→    onSuccess: (_res, status) => {
+   100→   100→      invalidate();
+   101→   101→      setSuspendOpen(false);
+   102→   102→      toast({
+   103→   103→        title: status === "SUSPENDED" ? "Customer suspended" : "Customer reactivated",
+   104→   104→      });
+   105→   105→    },
+   106→   106→    onError: (err: Error) => toast({ title: "Could not change status", description: err.message }),
+   107→   107→  });
+   108→   108→
+   109→   109→  if (isError) {
+   110→   110→    return (
+   111→   111→      <div>
+   112→   112→        <PageHeader title="Customer" onBack={back} />
+   113→   113→        <InlineError message={error instanceof Error ? error.message : "Could not load."} />
+   114→   114→      </div>
+   115→   115→    );
+   116→   116→  }
+   117→   117→
+   118→   118→  if (isLoading || !profile) {
+   119→   119→    return (
+   120→   120→      <div>
+   121→   121→        <PageHeader title="Customer" onBack={back} />
+   122→   122→        <SectionCard>
+   123→   123→          <RowsSkeleton rows={6} />
+   124→   124→        </SectionCard>
+   125→   125→      </div>
+   126→   126→    );
+   127→   127→  }
+   128→   128→
+   129→   129→  const { organization: org, users, addresses, orders, quotations, documents, approvedProductCount, pendingChangeRequests } = profile;
+   130→   130→  const suspended = org.status === "SUSPENDED";
+   131→   131→  const initials = org.name
+   132→   132→    .split(/\s+/)
+   133→   133→    .filter(Boolean)
+   134→   134→    .slice(0, 2)
+   135→   135→    .map((w) => w[0])
+   136→   136→    .join("")
+   137→   137→    .toUpperCase();
+   138→   138→
+   139→   139→  // Underline tab bar with a kraft indicator — matches the portal's editorial feel.
+   140→   140→  const TAB =
+   141→   141→    "h-9 flex-none justify-start rounded-none border-x-0 border-t-0 border-b-2 border-transparent bg-transparent px-3 py-2 data-[state=active]:rounded-none data-[state=active]:border-b-kraft data-[state=active]:bg-transparent data-[state=active]:text-kraft-ink data-[state=active]:shadow-none dark:data-[state=active]:text-kraft-ink";
+   142→   142→
+   143→   143→  return (
+   144→   144→    <div>
+   145→   145→      <PageHeader
+   146→   146→        title={
+   147→   147→          <span className="flex items-center gap-3.5">
+   148→   148→            <span
+   149→   149→              aria-hidden
+   150→   150→              className="flex size-12 shrink-0 items-center justify-center rounded-full bg-kraft-soft text-lead text-kraft-ink"
+   151→   151→            >
+   152→   152→              {initials}
+   153→   153→            </span>
+   154→   154→            <span className="text-balance">{org.name}</span>
+   155→   155→          </span>
+   156→   156→        }
+   157→   157→        onBack={back}
+   158→   158→        actions={
+   159→   159→          <div className="flex flex-wrap items-center gap-2">
+   160→   160→            {pendingChangeRequests > 0 && (
+   161→   161→              <span
+   162→   162→                className="inline-flex items-center gap-1.5 rounded-full bg-kraft-soft px-2 py-1 text-caption font-medium text-kraft-ink"
+   163→   163→                title="Customer-submitted change requests awaiting your decision. Review them on the order pages"
+   164→   164→              >
+   165→   165→                <span className="size-1.5 rounded-full bg-kraft" aria-hidden />
+   166→   166→                {pendingChangeRequests} change {pendingChangeRequests === 1 ? "request" : "requests"} pending
+   167→   167→              </span>
+   168→   168→            )}
+   169→   169→            <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setEditOpen(true)}>
+   170→   170→              <PencilLine className="size-3.5" aria-hidden /> Edit info
+   171→   171→            </Button>
+   172→   172→            <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setInviteOpen(true)}>
+   173→   173→              <UserPlus className="size-3.5" aria-hidden /> Invite user
+   174→   174→            </Button>
+   175→   175→            {suspended ? (
+   176→   176→              <Button
+   177→   177→                variant="outline"
+   178→   178→                size="sm"
+   179→   179→                className="gap-1.5 text-[var(--status-done-fg)] hover:bg-[var(--status-done-bg)]"
+   180→   180→                disabled={statusMutation.isPending}
+   181→   181→                onClick={() => statusMutation.mutate("ACTIVE")}
+   182→   182→              >
+   183→   183→                <CheckCircle2 className="size-3.5" aria-hidden /> Reactivate
+   184→   184→              </Button>
+   185→   185→            ) : (
+   186→   186→              <Button
+   187→   187→                variant="outline"
+   188→   188→                size="sm"
+   189→   189→                className="gap-1.5 text-[var(--status-danger-fg)] hover:bg-[var(--status-danger-bg)]"
+   190→   190→                onClick={() => setSuspendOpen(true)}
+   191→   191→              >
+   192→   192→                <Ban className="size-3.5" aria-hidden /> Suspend
+   193→   193→              </Button>
+   194→   194→            )}
+   195→   195→          </div>
+   196→   196→        }
+   197→   197→      />
+   198→   198→
+   199→   199→      <ViewEnter>
+   200→   200→      <Tabs defaultValue="overview" className="gap-5">
+   201→   201→        <TabsList className="h-auto w-full max-w-full flex-wrap justify-start gap-0.5 rounded-none border-b bg-transparent p-0 sm:w-auto sm:flex-nowrap">
+   202→   202→          <TabsTrigger value="overview" className={TAB}>Overview</TabsTrigger>
+   203→   203→          <TabsTrigger value="contacts" className={TAB}>Contacts &amp; addresses</TabsTrigger>
+   204→   204→          <TabsTrigger value="pricing" className={TAB}>Products &amp; pricing</TabsTrigger>
+   205→   205→          <TabsTrigger value="orders" className={TAB}>Orders</TabsTrigger>
+   206→   206→          <TabsTrigger value="quotes" className={TAB}>Quotes</TabsTrigger>
+   207→   207→          <TabsTrigger value="documents" className={TAB}>Documents</TabsTrigger>
+   208→   208→          <TabsTrigger value="internal" className={TAB}>Internal</TabsTrigger>
+   209→   209→        </TabsList>
+   210→   210→
+   211→   211→        {/* Overview */}
+   212→   212→        <TabsContent value="overview" className="space-y-4 sm:space-y-6">
+   213→   213→          <KpiStrip>
+   214→   214→            <KpiCell label="Orders" value={orders.length.toLocaleString("en-CA")} />
+   215→   215→            <KpiCell label="Quotes" value={quotations.length.toLocaleString("en-CA")} />
+   216→   216→            <KpiCell label="Approved products" value={approvedProductCount.toLocaleString("en-CA")} />
+   217→   217→            <KpiCell label="Documents" value={documents.length.toLocaleString("en-CA")} />
+   218→   218→          </KpiStrip>
+   219→   219→
+   220→   220→          <div className="grid gap-4 sm:gap-6 lg:grid-cols-2">
+   221→   221→            <SectionCard title="Billing account">
+   222→   222→              <dl>
+   223→   223→                <DefRow label="Business" value={org.name} />
+   224→   224→                <DefRow label="Customer code" value={<span className="font-mono text-body-sm">{org.code}</span>} />
+   225→   225→                <DefRow label="Billing address" value={`${dashed(org.billingLine1)}, ${dashed(org.billingCity)}, ${dashed(org.billingProvince)} ${dashed(org.billingPostal)}`} />
+   226→   226→                <DefRow label="Phone" value={dashed(org.phone)} />
+   227→   227→              </dl>
+   228→   228→            </SectionCard>
+   229→   229→
+   230→   230→            <SectionCard title="Portal users">
+   231→   231→              <ul className="space-y-2">
+   232→   232→                {users.map((u) => (
+   233→   233→                  <li key={u.id} className="flex items-center justify-between gap-3 rounded-md border bg-card px-3.5 py-2.5">
+   234→   234→                    <div className="min-w-0">
+   235→   235→                      <p className="truncate text-body-sm font-medium">
+   236→   236→                        {u.name}
+   237→   237→                        {u.title && <span className="ml-1.5 text-caption font-normal text-muted-foreground">· {u.title}</span>}
+   238→   238→                      </p>
+   239→   239→                      <p className="truncate text-caption text-muted-foreground">{u.email}</p>
+   240→   240→                    </div>
+   241→   241→                    <div className="flex shrink-0 flex-col items-end gap-1">
+   242→   242→                      <OrgRoleBadge role={u.orgRole} />
+   243→   243→                      <UserStatusBadge status={u.status} />
+   244→   244→                    </div>
+   245→   245→                  </li>
+   246→   246→                ))}
+   247→   247→                {users.length === 0 && (
+   248→   248→                  <p className="rounded-md border border-dashed bg-surface-sunken/60 px-4 py-6 text-center text-body-sm text-muted-foreground">
+   249→   249→                    No portal users yet.
+   250→   250→                  </p>
+   251→   251→                )}
+   252→   252→              </ul>
+   253→   253→            </SectionCard>
+   254→   254→          </div>
+   255→   255→        </TabsContent>
+   256→   256→
+   257→   257→        {/* Contacts & addresses */}
+   258→   258→        <TabsContent value="contacts" className="space-y-4 sm:space-y-6">
+   259→   259→          <SectionCard
+   260→   260→            title="Portal users"
+   261→   261→            action={
+   262→   262→              <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setInviteOpen(true)}>
+   263→   263→                <UserPlus className="size-3.5" aria-hidden /> Invite user
+   264→   264→              </Button>
+   265→   265→            }
+   266→   266→            bodyClassName="p-0"
+   267→   267→          >
+   268→   268→            {users.length === 0 ? (
+   269→   269→              <div className="p-4 sm:p-5">
+   270→   270→                <EmptyState
+   271→   271→                  icon={Users}
+   272→   272→                  title="No portal users"
+   273→   273→                  action={
+   274→   274→                    <Button variant="outline" onClick={() => setInviteOpen(true)}>
+   275→   275→                      <UserPlus className="size-4" aria-hidden /> Invite user
+   276→   276→                    </Button>
+   277→   277→                  }
+   278→   278→                />
+   279→   279→              </div>
+   280→   280→            ) : (
+   281→   281→              <div className="overflow-x-auto">
+   282→   282→                <Table className="min-w-[780px]">
+   283→   283→                  <TableHeader className="sticky top-0 z-10 bg-[var(--surface-sunken)]">
+   284→   284→                    <TableRow className="hover:bg-transparent">
+   285→   285→                      <Th>Name</Th>
+   286→   286→                      <Th>Email</Th>
+   287→   287→                      <Th>Role</Th>
+   288→   288→                      <Th>Status</Th>
+   289→   289→                      <Th>Last login</Th>
+   290→   290→                      <Th className="text-center">Access</Th>
+   291→   291→                    </TableRow>
+   292→   292→                  </TableHeader>
+   293→   293→                  <TableBody>
+   294→   294→                    {users.map((u) => (
+   295→   295→                      <UserRow key={u.id} user={u} customerId={customerId} onDone={invalidate} />
+   296→   296→                    ))}
+   297→   297→                  </TableBody>
+   298→   298→                </Table>
+   299→   299→              </div>
+   300→   300→            )}
+   301→   301→          </SectionCard>
+   302→   302→
+   303→   303→          <SectionCard title="Shipping addresses">
+   304→   304→            {addresses.length === 0 ? (
+   305→   305→              <p className="rounded-md border border-dashed bg-surface-sunken/60 px-4 py-6 text-center text-body-sm text-muted-foreground">
+   306→   306→                No shipping addresses yet.
+   307→   307→              </p>
+   308→   308→            ) : (
+   309→   309→              <ul className="grid gap-3 sm:grid-cols-2">
+   310→   310→                {addresses.map((a) => (
+   311→   311→                  <AddressCard key={a.id} address={a} />
+   312→   312→                ))}
+   313→   313→              </ul>
+   314→   314→            )}
+   315→   315→          </SectionCard>
+   316→   316→        </TabsContent>
+   317→   317→
+   318→   318→        {/* Products & pricing */}
+   319→   319→        <TabsContent value="pricing">
+   320→   320→          <SectionCard title="Products &amp; pricing">
+   321→   321→            <PricingMatrix orgId={customerId} />
+   322→   322→          </SectionCard>
+   323→   323→        </TabsContent>
+   324→   324→
+   325→   325→        {/* Orders */}
+   326→   326→        <TabsContent value="orders">
+   327→   327→          <SectionCard title="Orders" bodyClassName="p-0">
+   328→   328→            {orders.length === 0 ? (
+   329→   329→              <div className="p-5">
+   330→   330→                <EmptyState icon={ReceiptText} title="No orders yet" />
+   331→   331→              </div>
+   332→   332→            ) : (
+   333→   333→              <div className="max-h-[60vh] overflow-auto">
+   334→   334→                <Table className="min-w-[700px]">
+   335→   335→                  <TableHeader className="sticky top-0 z-10 bg-[var(--surface-sunken)]">
+   336→   336→                    <TableRow className="hover:bg-transparent">
+   337→   337→                      <Th>Order</Th>
+   338→   338→                      <Th>Placed</Th>
+   339→   339→                      <Th>Summary</Th>
+   340→   340→                      <Th className="text-right">Total</Th>
+   341→   341→                      <Th>Status</Th>
+   342→   342→                      <Th>Est. delivery</Th>
+   343→   343→                    </TableRow>
+   344→   344→                  </TableHeader>
+   345→   345→                  <TableBody>
+   346→   346→                    {orders.map((o) => (
+   347→   347→                      <TableRow key={o.id} className="cursor-pointer" onClick={() => navigate("admin-order-detail", { id: o.id })}>
+   348→   348→                        <Td>
+   349→   349→                          <span className="font-mono text-body-sm font-medium">{o.orderNumber}</span>
+   350→   350→                        </Td>
+   351→   351→                        <Td className="whitespace-nowrap text-muted-foreground">{formatDate(o.createdAt)}</Td>
+   352→   352→                        <Td className="max-w-[210px] truncate text-muted-foreground">{o.itemSummary}</Td>
+   353→   353→                        <Td className="text-right font-medium">
+   354→   354→                          <Money cents={o.totalCents} />
+   355→   355→                        </Td>
+   356→   356→                        <Td>
+   357→   357→                          <StatusBadge status={o.status} kind="order" />
+   358→   358→                        </Td>
+   359→   359→                        <Td className="whitespace-nowrap text-muted-foreground">{formatDate(o.estimatedDelivery)}</Td>
+   360→   360→                      </TableRow>
+   361→   361→                    ))}
+   362→   362→                  </TableBody>
+   363→   363→                </Table>
+   364→   364→              </div>
+   365→   365→            )}
+   366→   366→          </SectionCard>
+   367→   367→        </TabsContent>
+   368→   368→
+   369→   369→        {/* Quotations */}
+   370→   370→        <TabsContent value="quotes">
+   371→   371→          <SectionCard title="Quotes" bodyClassName="p-0">
+   372→   372→            {quotations.length === 0 ? (
+   373→   373→              <div className="p-5">
+   374→   374→                <EmptyState icon={FileText} title="No quotes yet" />
+   375→   375→              </div>
+   376→   376→            ) : (
+   377→   377→              <div className="max-h-[60vh] overflow-auto">
+   378→   378→                <Table className="min-w-[720px]">
+   379→   379→                  <TableHeader className="sticky top-0 z-10 bg-[var(--surface-sunken)]">
+   380→   380→                    <TableRow className="hover:bg-transparent">
+   381→   381→                      <Th>Quote</Th>
+   382→   382→                      <Th>Title</Th>
+   383→   383→                      <Th>Status</Th>
+   384→   384→                      <Th className="text-right">Total</Th>
+   385→   385→                      <Th>Created</Th>
+   386→   386→                      <Th>Expires</Th>
+   387→   387→                    </TableRow>
+   388→   388→                  </TableHeader>
+   389→   389→                  <TableBody>
+   390→   390→                    {quotations.map((q) => (
+   391→   391→                      <TableRow key={q.id} className="cursor-pointer" onClick={() => navigate("admin-quote-detail", { id: q.id })}>
+   392→   392→                        <Td>
+   393→   393→                          <span className="font-mono text-body-sm font-medium">{q.quoteNumber}</span>
+   394→   394→                          {q.revision > 0 && <p className="text-caption text-muted-foreground">Rev {q.revision}</p>}
+   395→   395→                        </Td>
+   396→   396→                        <Td className="max-w-[260px] truncate">{q.title}</Td>
+   397→   397→                        <Td>
+   398→   398→                          <StatusBadge status={q.status} kind="quote" />
+   399→   399→                        </Td>
+   400→   400→                        <Td className="text-right font-medium">
+   401→   401→                          {q.itemsTotalCents > 0 ? <Money cents={q.itemsTotalCents} /> : <span className="text-caption text-muted-foreground">Not priced</span>}
+   402→   402→                        </Td>
+   403→   403→                        <Td className="whitespace-nowrap text-muted-foreground">{formatDate(q.createdAt)}</Td>
+   404→   404→                        <Td className="whitespace-nowrap text-muted-foreground">{formatDate(q.expiryDate)}</Td>
+   405→   405→                      </TableRow>
+   406→   406→                    ))}
+   407→   407→                  </TableBody>
+   408→   408→                </Table>
+   409→   409→              </div>
+   410→   410→            )}
+   411→   411→          </SectionCard>
+   412→   412→        </TabsContent>
+   413→   413→
+   414→   414→        {/* Documents */}
+   415→   415→        <TabsContent value="documents">
+   416→   416→          <SectionCard title="Documents" bodyClassName="p-0">
+   417→   417→            {documents.length === 0 ? (
+   418→   418→              <div className="p-5">
+   419→   419→                <EmptyState
+   420→   420→                  icon={FileText}
+   421→   421→                  title="No documents"
+   422→   422→                  action={
+   423→   423→                    <Button variant="outline" onClick={() => navigate("admin-documents")}>
+   424→   424→                      Go to Documents
+   425→   425→                    </Button>
+   426→   426→                  }
+   427→   427→                />
+   428→   428→              </div>
+   429→   429→            ) : (
+   430→   430→              <ul className="divide-y">
+   431→   431→                {documents.map((doc) => (
+   432→   432→                  <li key={doc.id} className="flex flex-wrap items-center gap-2.5 px-5 py-3">
+   433→   433→                    <FileText className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+   434→   434→                    <div className="min-w-0 flex-1">
+   435→   435→                      <p className="truncate text-body-sm font-medium">{doc.title}</p>
+   436→   436→                      <p className="truncate text-caption text-muted-foreground">
+   437→   437→                        <span className="font-mono">{doc.fileName}</span> · {doc.sizeLabel} · uploaded {formatDate(doc.createdAt)}
+   438→   438→                        {doc.orderNumber ? ` · ${doc.orderNumber}` : ""}
+   439→   439→                      </p>
+   440→   440→                    </div>
+   441→   441→                    <DocumentCategoryBadge category={doc.category} />
+   442→   442→                  </li>
+   443→   443→                ))}
+   444→   444→              </ul>
+   445→   445→            )}
+   446→   446→          </SectionCard>
+   447→   447→        </TabsContent>
+   448→   448→
+   449→   449→        {/* Internal */}
+   450→   450→        <TabsContent value="internal" className="space-y-4 sm:space-y-6">
+   451→   451→          <RelationshipPreferencesCard
+   452→   452→            customerId={customerId}
+   453→   453→            preferences={org.preferences}
+   454→   454→            users={users}
+   455→   455→            onSaved={invalidate}
+   456→   456→          />
+   457→   457→          <InternalNotesCard customerId={customerId} initialNotes={org.internalNotes} onSaved={invalidate} />
+   458→   458→        </TabsContent>
+   459→   459→      </Tabs>
+   460→   460→      </ViewEnter>
+   461→   461→
+   462→   462→      {/* Suspend confirm */}
+   463→   463→      <AlertDialog open={suspendOpen} onOpenChange={setSuspendOpen}>
+   464→   464→        <AlertDialogContent>
+   465→   465→          <AlertDialogHeader>
+   466→   466→            <AlertDialogTitle>Suspend {org.name}?</AlertDialogTitle>
+   467→   467→            <AlertDialogDescription className="leading-relaxed">
+   468→   468→              Their portal users will be signed out and unable to sign in, place orders or receive quotes. Historical
+   469→   469→              orders, documents and pricing are preserved, and the account can be reactivated at any time.
+   470→   470→            </AlertDialogDescription>
+   471→   471→          </AlertDialogHeader>
+   472→   472→          <AlertDialogFooter>
+   473→   473→            <AlertDialogCancel>Keep active</AlertDialogCancel>
+   474→   474→            <AlertDialogAction
+   475→   475→              className="bg-destructive text-white shadow-xs hover:bg-destructive/90 focus-visible:ring-destructive/35"
+   476→   476→              disabled={statusMutation.isPending}
+   477→   477→              onClick={(e) => {
+   478→   478→                e.preventDefault();
+   479→   479→                statusMutation.mutate("SUSPENDED");
+   480→   480→              }}
+   481→   481→            >
+   482→   482→              {statusMutation.isPending ? "Suspending…" : "Yes, suspend customer"}
+   483→   483→            </AlertDialogAction>
+   484→   484→          </AlertDialogFooter>
+   485→   485→        </AlertDialogContent>
+   486→   486→      </AlertDialog>
+   487→   487→
+   488→   488→      {/* Edit info dialog */}
+   489→   489→      <EditCustomerDialog open={editOpen} onOpenChange={setEditOpen} profile={profile} onSaved={invalidate} />
+   490→   490→
+   491→   491→      {/* Invite user dialog */}
+   492→   492→      <InviteUserDialog open={inviteOpen} onOpenChange={setInviteOpen} customerId={customerId} onSaved={invalidate} />
+   493→   493→    </div>
+   494→   494→  );
+   495→   495→}
+   496→   496→
+   497→   497→// ─── User access row ──────────────────────────────────────────────────────────
+   498→   498→
+   499→   499→function UserRow({
+   500→   500→  user,
+   501→   501→  customerId,
+   502→   502→  onDone,
+   503→   503→}: {
+   504→   504→  user: CustomerProfile["users"][number];
+   505→   505→  customerId: string;
+   506→   506→  onDone: () => void;
+   507→   507→}) {
+   508→   508→  const queryClient = useQueryClient();
+   509→   509→  const [confirmDisable, setConfirmDisable] = useState(false);
+   510→   510→
+   511→   511→  const roleMutation = useMutation({
+   512→   512→    mutationFn: (orgRole: string) =>
+   513→   513→      api.patch<{ ok: boolean }>(`/api/admin/customers/${customerId}/users/${user.id}`, { orgRole }),
+   514→   514→    onSuccess: (_res, orgRole) => {
+   515→   515→      queryClient.invalidateQueries({ queryKey: ["admin", "customer", customerId] });
+   516→   516→      queryClient.invalidateQueries({ queryKey: ["admin", "customers"] });
+   517→   517→      onDone();
+   518→   518→      toast({
+   519→   519→        title: `${user.name} is now ${ORG_ROLE_LABELS[orgRole] ?? orgRole}`,
+   520→   520→      });
+   521→   521→    },
+   522→   522→    onError: (err: Error) => toast({ title: "Could not change role", description: err.message }),
+   523→   523→  });
+   524→   524→
+   525→   525→  const toggle = useMutation({
+   526→   526→    mutationFn: (status: "ACTIVE" | "DISABLED") =>
+   527→   527→      api.put<{ ok: boolean }>(`/api/admin/customers/${customerId}/users/${user.id}`, { status }),
+   528→   528→    onSuccess: (_res, status) => {
+   529→   529→      queryClient.invalidateQueries({ queryKey: ["admin", "customer", customerId] });
+   530→   530→      queryClient.invalidateQueries({ queryKey: ["admin", "customers"] });
+   531→   531→      onDone();
+   532→   532→      toast({
+   533→   533→        title: status === "ACTIVE" ? `${user.name} can sign in again` : `${user.name} disabled`,
+   534→   534→      });
+   535→   535→      setConfirmDisable(false);
+   536→   536→    },
+   537→   537→    onError: (err: Error) => toast({ title: "Could not update user", description: err.message }),
+   538→   538→  });
+   539→   539→
+   540→   540→  const enabled = user.status !== "DISABLED";
+   541→   541→
+   542→   542→  return (
+   543→   543→    <TableRow>
+   544→   544→      <Td>
+   545→   545→        <p className="font-medium">{user.name}</p>
+   546→   546→        {user.title && <p className="text-caption text-muted-foreground">{user.title}</p>}
+   547→   547→      </Td>
+   548→   548→      <Td className="text-muted-foreground">{user.email}</Td>
+   549→   549→      <Td>
+   550→   550→        <Select
+   551→   551→          value={user.orgRole}
+   552→   552→          onValueChange={(v) => roleMutation.mutate(v)}
+   553→   553→          disabled={roleMutation.isPending}
+   554→   554→        >
+   555→   555→          <SelectTrigger
+   556→   556→            className="h-8 w-[180px] text-body-sm"
+   557→   557→            aria-label={`Portal role for ${user.name}`}
+   558→   558→            title={ORG_ROLE_DESCRIPTIONS[user.orgRole]}
+   559→   559→          >
+   560→   560→            <SelectValue />
+   561→   561→          </SelectTrigger>
+   562→   562→          <SelectContent>
+   563→   563→            {ORG_ROLES.map((r) => (
+   564→   564→              <SelectItem key={r} value={r}>
+   565→   565→                {ORG_ROLE_LABELS[r]}
+   566→   566→              </SelectItem>
+   567→   567→            ))}
+   568→   568→          </SelectContent>
+   569→   569→        </Select>
+   570→   570→        <p
+   571→   571→          className="mt-0.5 max-w-[210px] text-caption leading-snug text-muted-foreground line-clamp-2"
+   572→   572→          title={ORG_ROLE_DESCRIPTIONS[user.orgRole]}
+   573→   573→        >
+   574→   574→          {ORG_ROLE_DESCRIPTIONS[user.orgRole]}
+   575→   575→        </p>
+   576→   576→      </Td>
+   577→   577→      <Td>
+   578→   578→        <UserStatusBadge status={user.status} />
+   579→   579→      </Td>
+   580→   580→      <Td className="whitespace-nowrap text-muted-foreground">
+   581→   581→        {user.lastLoginAt ? (
+   582→   582→          <span>
+   583→   583→            {formatDate(user.lastLoginAt)}
+   584→   584→            <span className="ml-1.5 tnum text-caption text-muted-foreground">{timeAgo(user.lastLoginAt)}</span>
+   585→   585→          </span>
+   586→   586→        ) : (
+   587→   587→          "Never"
+   588→   588→        )}
+   589→   589→      </Td>
+   590→   590→      <Td className="text-center">
+   591→   591→        <div className="flex items-center justify-center gap-2">
+   592→   592→          <Switch
+   593→   593→            checked={enabled}
+   594→   594→            disabled={toggle.isPending}
+   595→   595→            onCheckedChange={(v) => (v ? toggle.mutate("ACTIVE") : setConfirmDisable(true))}
+   596→   596→            aria-label={`Toggle portal access for ${user.name}`}
+   597→   597→          />
+   598→   598→          <span className="text-caption text-muted-foreground">{enabled ? "Enabled" : "Disabled"}</span>
+   599→   599→        </div>
+   600→   600→      </Td>
+   601→   601→      <AlertDialog open={confirmDisable} onOpenChange={setConfirmDisable}>
+   602→   602→        <AlertDialogContent>
+   603→   603→          <AlertDialogHeader>
+   604→   604→            <AlertDialogTitle>Disable {user.name}?</AlertDialogTitle>
+   605→   605→            <AlertDialogDescription className="leading-relaxed">
+   606→   606→              They will immediately lose access to the customer portal until re-enabled. Orders and messages they
+   607→   607→              submitted are preserved.
+   608→   608→            </AlertDialogDescription>
+   609→   609→          </AlertDialogHeader>
+   610→   610→          <AlertDialogFooter>
+   611→   611→            <AlertDialogCancel>Keep access</AlertDialogCancel>
+   612→   612→            <AlertDialogAction
+   613→   613→              className="bg-destructive text-white shadow-xs hover:bg-destructive/90 focus-visible:ring-destructive/35"
+   614→   614→              disabled={toggle.isPending}
+   615→   615→              onClick={() => toggle.mutate("DISABLED")}
+   616→   616→            >
+   617→   617→              {toggle.isPending ? "Disabling…" : "Yes, disable user"}
+   618→   618→            </AlertDialogAction>
+   619→   619→          </AlertDialogFooter>
+   620→   620→        </AlertDialogContent>
+   621→   621→      </AlertDialog>
+   622→   622→    </TableRow>
+   623→   623→  );
+   624→   624→}
+   625→   625→
+   626→   626→// ─── Internal notes ────────────────────────────────────────────────────────────
+   627→   627→
+   628→   628→function InternalNotesCard({
+   629→   629→  customerId,
+   630→   630→  initialNotes,
+   631→   631→  onSaved,
+   632→   632→}: {
+   633→   633→  customerId: string;
+   634→   634→  initialNotes: string | null;
+   635→   635→  onSaved: () => void;
+   636→   636→}) {
+   637→   637→  const [notes, setNotes] = useState(initialNotes ?? "");
+   638→   638→  const dirty = notes !== (initialNotes ?? "");
+   639→   639→
+   640→   640→  const save = useMutation({
+   641→   641→    mutationFn: () => api.put<{ ok: boolean }>(`/api/admin/customers/${customerId}`, { internalNotes: notes.trim() || null }),
+   642→   642→    onSuccess: () => {
+   643→   643→      onSaved();
+   644→   644→      toast({ title: "Internal notes saved" });
+   645→   645→    },
+   646→   646→    onError: (err: Error) => toast({ title: "Could not save notes", description: err.message }),
+   647→   647→  });
+   648→   648→
+   649→   649→  return (
+   650→   650→    <SectionCard
+   651→   651→      title={
+   652→   652→        <span className="flex items-center gap-2">
+   653→   653→          <Lock className="size-4 shrink-0 text-kraft-ink" aria-hidden />
+   654→   654→          Internal notes
+   655→   655→        </span>
+   656→   656→      }
+   657→   657→      description="Internal only"
+   658→   658→      className="border-l-2 border-l-kraft bg-surface-sunken"
+   659→   659→    >
+   660→   660→      <Textarea
+   661→   661→        rows={7}
+   662→   662→        value={notes}
+   663→   663→        onChange={(e) => setNotes(e.target.value)}
+   664→   664→        placeholder="Rate confirmations, delivery preferences, escalations, credit flags…"
+   665→   665→        className="bg-card leading-relaxed"
+   666→   666→        aria-label="Internal notes"
+   667→   667→      />
+   668→   668→      <div className="mt-3 flex items-center justify-between gap-3 border-t pt-3">
+   669→   669→        <p className="text-caption text-muted-foreground">
+   670→   670→          {notes.trim().length} characters
+   671→   671→        </p>
+   672→   672→        <Button className="gap-1.5" size="sm" disabled={!dirty || save.isPending} onClick={() => save.mutate()}>
+   673→   673→          <Save className="size-3.5" aria-hidden />
+   674→   674→          {save.isPending ? "Saving…" : "Save notes"}
+   675→   675→        </Button>
+   676→   676→      </div>
+   677→   677→    </SectionCard>
+   678→   678→  );
+   679→   679→}
+   680→   680→
+   681→   681→// ─── Edit customer dialog ─────────────────────────────────────────────────────
+   682→   682→
+   683→   683→function EditCustomerDialog({
+   684→   684→  open,
+   685→   685→  onOpenChange,
+   686→   686→  profile,
+   687→   687→  onSaved,
+   688→   688→}: {
+   689→   689→  open: boolean;
+   690→   690→  onOpenChange: (v: boolean) => void;
+   691→   691→  profile: CustomerProfile;
+   692→   692→  onSaved: () => void;
+   693→   693→}) {
+   694→   694→  const org = profile.organization;
+   695→   695→  const [form, setForm] = useState({
+   696→   696→    name: org.name,
+   697→   697→    phone: org.phone,
+   698→   698→    billingLine1: org.billingLine1,
+   699→   699→    billingCity: org.billingCity,
+   700→   700→    billingProvince: org.billingProvince,
+   701→   701→    billingPostal: org.billingPostal,
+   702→   702→  });
+   703→   703→  const [submitError, setSubmitError] = useState<string | null>(null);
+   704→   704→
+   705→   705→  const save = useMutation({
+   706→   706→    mutationFn: () =>
+   707→   707→      api.put<{ ok: boolean }>(`/api/admin/customers/${org.id}`, {
+   708→   708→        name: form.name.trim(),
+   709→   709→        phone: form.phone.trim() || null,
+   710→   710→        billingLine1: form.billingLine1.trim() || null,
+   711→   711→        billingCity: form.billingCity.trim() || null,
+   712→   712→        billingProvince: form.billingProvince.trim() || null,
+   713→   713→        billingPostal: form.billingPostal.trim() || null,
+   714→   714→      }),
+   715→   715→    onSuccess: () => {
+   716→   716→      onSaved();
+   717→   717→      onOpenChange(false);
+   718→   718→      toast({ title: "Customer details updated" });
+   719→   719→    },
+   720→   720→    onError: (err: Error) => setSubmitError(err.message),
+   721→   721→  });
+   722→   722→
+   723→   723→  const set = (key: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
+   724→   724→    setForm((f) => ({ ...f, [key]: e.target.value }));
+   725→   725→
+   726→   726→  return (
+   727→   727→    <Dialog open={open} onOpenChange={(v) => { onOpenChange(v); if (!v) setSubmitError(null); }}>
+   728→   728→      <DialogContent className="sm:max-w-[520px]">
+   729→   729→        <form
+   730→   730→          onSubmit={(e) => {
+   731→   731→            e.preventDefault();
+   732→   732→            setSubmitError(null);
+   733→   733→            if (!form.name.trim()) {
+   734→   734→              setSubmitError("Business name is required.");
+   735→   735→              return;
+   736→   736→            }
+   737→   737→            save.mutate();
+   738→   738→          }}
+   739→   739→          className="space-y-4"
+   740→   740→        >
+   741→   741→          <DialogHeader className="border-b pb-4">
+   742→   742→            <DialogTitle>Edit customer details</DialogTitle>
+   743→   743→          </DialogHeader>
+   744→   744→
+   745→   745→          <div className="grid gap-3.5 sm:grid-cols-2">
+   746→   746→            <div className="space-y-1.5 sm:col-span-2">
+   747→   747→              <Label htmlFor="edit-name" className="text-body-sm">Business name</Label>
+   748→   748→              <Input id="edit-name" value={form.name} onChange={set("name")} className="h-9 text-body-sm" required />
+   749→   749→            </div>
+   750→   750→            <div className="space-y-1.5 sm:col-span-2">
+   751→   751→              <Label htmlFor="edit-phone" className="text-body-sm">Phone</Label>
+   752→   752→              <Input id="edit-phone" value={form.phone} onChange={set("phone")} placeholder="(416) 555-0182" className="h-9 text-body-sm" />
+   753→   753→            </div>
+   754→   754→            <div className="space-y-1.5 sm:col-span-2">
+   755→   755→              <GroupLabel className="mb-1">Billing address</GroupLabel>
+   756→   756→              <div className="grid gap-3.5 sm:grid-cols-2">
+   757→   757→                <div className="space-y-1.5 sm:col-span-2">
+   758→   758→                  <Label htmlFor="edit-line1" className="text-body-sm">Street address</Label>
+   759→   759→                  <Input id="edit-line1" value={form.billingLine1} onChange={set("billingLine1")} className="h-9 text-body-sm" />
+   760→   760→                </div>
+   761→   761→                <div className="space-y-1.5">
+   762→   762→                  <Label htmlFor="edit-city" className="text-body-sm">City</Label>
+   763→   763→                  <Input id="edit-city" value={form.billingCity} onChange={set("billingCity")} className="h-9 text-body-sm" />
+   764→   764→                </div>
+   765→   765→                <div className="grid grid-cols-2 gap-3.5">
+   766→   766→                  <div className="space-y-1.5">
+   767→   767→                    <Label htmlFor="edit-province" className="text-body-sm">Province</Label>
+   768→   768→                    <Input id="edit-province" value={form.billingProvince} onChange={set("billingProvince")} maxLength={2} className="h-9 text-body-sm" />
+   769→   769→                  </div>
+   770→   770→                  <div className="space-y-1.5">
+   771→   771→                    <Label htmlFor="edit-postal" className="text-body-sm">Postal</Label>
+   772→   772→                    <Input id="edit-postal" value={form.billingPostal} onChange={set("billingPostal")} className="h-9 text-body-sm" />
+   773→   773→                  </div>
+   774→   774→                </div>
+   775→   775→              </div>
+   776→   776→            </div>
+   777→   777→          </div>
+   778→   778→
+   779→   779→          {submitError && <p className="text-caption text-[var(--status-danger-fg)]">{submitError}</p>}
+   780→   780→
+   781→   781→          <DialogFooter className="border-t pt-4">
+   782→   782→            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
+   783→   783→            <Button type="submit" className="gap-1.5" disabled={save.isPending}>
+   784→   784→              <PencilLine className="size-4" aria-hidden />
+   785→   785→              {save.isPending ? "Saving…" : "Save changes"}
+   786→   786→            </Button>
+   787→   787→          </DialogFooter>
+   788→   788→        </form>
+   789→   789→      </DialogContent>
+   790→   790→    </Dialog>
+   791→   791→  );
+   792→   792→}
+   793→   793→
+   794→   794→// ─── Invite user dialog ───────────────────────────────────────────────────────
+   795→   795→
+   796→   796→function InviteUserDialog({
+   797→   797→  open,
+   798→   798→  onOpenChange,
+   799→   799→  customerId,
+   800→   800→  onSaved,
+   801→   801→}: {
+   802→   802→  open: boolean;
+   803→   803→  onOpenChange: (v: boolean) => void;
+   804→   804→  customerId: string;
+   805→   805→  onSaved: () => void;
+   806→   806→}) {
+   807→   807→  const [form, setForm] = useState({ email: "", name: "", title: "" });
+   808→   808→  const [result, setResult] = useState<{ tempPassword: string } | null>(null);
+   809→   809→  const [submitError, setSubmitError] = useState<string | null>(null);
+   810→   810→
+   811→   811→  const invite = useMutation({
+   812→   812→    mutationFn: () =>
+   813→   813→      api.post<{ tempPassword: string }>(`/api/admin/customers/${customerId}/users`, {
+   814→   814→        email: form.email.trim(),
+   815→   815→        name: form.name.trim(),
+   816→   816→        title: form.title.trim() || undefined,
+   817→   817→      }),
+   818→   818→    onSuccess: (res) => {
+   819→   819→      setResult(res);
+   820→   820→      onSaved();
+   821→   821→      toast({ title: "User invited" });
+   822→   822→    },
+   823→   823→    onError: (err: Error) => setSubmitError(err.message),
+   824→   824→  });
+   825→   825→
+   826→   826→  function reset() {
+   827→   827→    setForm({ email: "", name: "", title: "" });
+   828→   828→    setResult(null);
+   829→   829→    setSubmitError(null);
+   830→   830→    invite.reset();
+   831→   831→  }
+   832→   832→
+   833→   833→  return (
+   834→   834→    <Dialog open={open} onOpenChange={(v) => { onOpenChange(v); if (!v) reset(); }}>
+   835→   835→      <DialogContent className="sm:max-w-[460px]">
+   836→   836→        {result ? (
+   837→   837→          <>
+   838→   838→            <DialogHeader className="border-b pb-4">
+   839→   839→              <DialogTitle>User invited</DialogTitle>
+   840→   840→            </DialogHeader>
+   841→   841→            <TempPasswordPanel email={form.email.trim()} password={result.tempPassword} />
+   842→   842→            <DialogFooter className="border-t pt-4">
+   843→   843→              <Button variant="outline" onClick={reset}>Invite another</Button>
+   844→   844→              <Button onClick={() => { onOpenChange(false); reset(); }}>Done</Button>
+   845→   845→            </DialogFooter>
+   846→   846→          </>
+   847→   847→        ) : (
+   848→   848→          <form
+   849→   849→            onSubmit={(e) => {
+   850→   850→              e.preventDefault();
+   851→   851→              setSubmitError(null);
+   852→   852→              if (!form.email.trim() || !form.name.trim()) {
+   853→   853→                setSubmitError("Name and email are required.");
+   854→   854→                return;
+   855→   855→              }
+   856→   856→              if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) {
+   857→   857→                setSubmitError("Enter a valid email address.");
+   858→   858→                return;
+   859→   859→              }
+   860→   860→              invite.mutate();
+   861→   861→            }}
+   862→   862→            className="space-y-4"
+   863→   863→          >
+   864→   864→            <DialogHeader className="border-b pb-4">
+   865→   865→              <DialogTitle>Invite user</DialogTitle>
+   866→   866→            </DialogHeader>
+   867→   867→            <div className="grid gap-3.5">
+   868→   868→              <div className="space-y-1.5">
+   869→   869→                <Label htmlFor="invite-name" className="text-body-sm">Full name</Label>
+   870→   870→                <Input id="invite-name" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="e.g. Sofia Lindqvist" className="h-9 text-body-sm" required />
+   871→   871→              </div>
+   872→   872→              <div className="space-y-1.5">
+   873→   873→                <Label htmlFor="invite-email" className="text-body-sm">Email address</Label>
+   874→   874→                <Input id="invite-email" type="email" value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} placeholder="sofia@company.com" className="h-9 text-body-sm" required />
+   875→   875→              </div>
+   876→   876→              <div className="space-y-1.5">
+   877→   877→                <Label htmlFor="invite-title" className="text-body-sm">Job title <span className="text-muted-foreground">(optional)</span></Label>
+   878→   878→                <Input id="invite-title" value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} placeholder="e.g. Operations Manager" className="h-9 text-body-sm" />
+   879→   879→              </div>
+   880→   880→            </div>
+   881→   881→            {submitError && <p className="text-caption text-[var(--status-danger-fg)]">{submitError}</p>}
+   882→   882→            <DialogFooter className="border-t pt-4">
+   883→   883→              <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
+   884→   884→              <Button type="submit" className="gap-1.5" disabled={invite.isPending}>
+   885→   885→                <Plus className="size-4" aria-hidden />
+   886→   886→                {invite.isPending ? "Inviting…" : "Invite user"}
+   887→   887→              </Button>
+   888→   888→            </DialogFooter>
+   889→   889→          </form>
+   890→   890→        )}
+   891→   891→      </DialogContent>
+   892→   892→    </Dialog>
+   893→   893→  );
+   894→   894→}
+   895→   895→
+   896→   896→// ─── Shipping addresses (self-managed by the customer — no review) ──────────
+   897→   897→
+   898→   898→function AddressCard({ address }: { address: CustomerProfile["addresses"][number] }) {
+   899→   899→  return (
+   900→   900→    <li className="rounded-[14px] border bg-card p-4 shadow-xs">
+   901→   901→      <div className="flex flex-wrap items-center justify-between gap-2">
+   902→   902→        <GroupLabel>{address.label}</GroupLabel>
+   903→   903→        {address.isDefault && (
+   904→   904→          <span className="rounded-full bg-[var(--status-done-bg)] px-1.5 py-0.5 text-micro font-medium text-[var(--status-done-fg)]">
+   905→   905→            Default
+   906→   906→          </span>
+   907→   907→        )}
+   908→   908→      </div>
+   909→   909→      <p className="mt-1.5 text-body-sm leading-relaxed">
+   910→   910→        {address.line1}
+   911→   911→        {address.line2 ? `, ${address.line2}` : ""}
+   912→   912→        <br />
+   913→   913→        {address.city}, {address.province} {address.postal}
+   914→   914→      </p>
+   915→   915→      {address.requestedByName && (
+   916→   916→        <p className="mt-1.5 text-caption leading-snug text-muted-foreground">
+   917→   917→          Added by {address.requestedByName}
+   918→   918→          {address.requestedAt ? ` · ${formatDate(address.requestedAt)}` : ""}
+   919→   919→        </p>
+   920→   920→      )}
+   921→   921→    </li>
+   922→   922→  );
+   923→   923→}
+   924→   924→
+   925→   925→// ─── Relationship preferences (internal) ──────────────────────────────────────
+   926→   926→
+   927→   927→const CONTACT_METHODS = [
+   928→   928→  { value: "EMAIL", label: "Email" },
+   929→   929→  { value: "PHONE", label: "Phone" },
+   930→   930→  { value: "PORTAL", label: "ClientHub portal" },
+   931→   931→] as const;
+   932→   932→
+   933→   933→const PREF_NONE = "__none__";
+   934→   934→
+   935→   935→function prefsForm(preferences: OrgPreferences | null) {
+   936→   936→  return {
+   937→   937→    preferredContactUserId: preferences?.preferredContactUserId ?? "",
+   938→   938→    preferredContactMethod: preferences?.preferredContactMethod ?? "",
+   939→   939→    deliveryInstructions: preferences?.deliveryInstructions ?? "",
+   940→   940→    commonlyOrderedNote: preferences?.commonlyOrderedNote ?? "",
+   941→   941→  };
+   942→   942→}
+   943→   943→
+   944→   944→function RelationshipPreferencesCard({
+   945→   945→  customerId,
+   946→   946→  preferences,
+   947→   947→  users,
+   948→   948→  onSaved,
+   949→   949→}: {
+   950→   950→  customerId: string;
+   951→   951→  preferences: OrgPreferences | null;
+   952→   952→  users: CustomerProfile["users"];
+   953→   953→  onSaved: () => void;
+   954→   954→}) {
+   955→   955→  const queryClient = useQueryClient();
+   956→   956→  const [form, setForm] = useState(() => prefsForm(preferences));
+   957→   957→  const [prefsKey, setPrefsKey] = useState("");
+   958→   958→
+   959→   959→  // Re-sync the form when the saved preferences change on the server.
+   960→   960→  const key = JSON.stringify(preferences ?? null);
+   961→   961→  if (prefsKey !== key) {
+   962→   962→    setPrefsKey(key);
+   963→   963→    setForm(prefsForm(preferences));
+   964→   964→  }
+   965→   965→
+   966→   966→  const dirty = JSON.stringify(form) !== JSON.stringify(prefsForm(preferences));
+   967→   967→
+   968→   968→  const save = useMutation({
+   969→   969→    mutationFn: () =>
+   970→   970→      api.patch<{ ok: boolean }>(`/api/admin/customers/${customerId}`, {
+   971→   971→        preferences: {
+   972→   972→          preferredContactUserId: form.preferredContactUserId || null,
+   973→   973→          preferredContactMethod: form.preferredContactMethod || null,
+   974→   974→          deliveryInstructions: form.deliveryInstructions.trim() || null,
+   975→   975→          commonlyOrderedNote: form.commonlyOrderedNote.trim() || null,
+   976→   976→        },
+   977→   977→      }),
+   978→   978→    onSuccess: () => {
+   979→   979→      queryClient.invalidateQueries({ queryKey: ["admin", "customer", customerId] });
+   980→   980→      onSaved();
+   981→   981→      toast({ title: "Relationship preferences saved" });
+   982→   982→    },
+   983→   983→    onError: (err: Error) => toast({ title: "Could not save preferences", description: err.message }),
+   984→   984→  });
+   985→   985→
+   986→   986→  return (
+   987→   987→    <SectionCard
+   988→   988→      title="Relationship preferences"
+   989→   989→    >
+   990→   990→      <div className="grid gap-3.5 sm:grid-cols-2">
+   991→   991→        <div className="space-y-1.5">
+   992→   992→          <Label htmlFor="pref-contact" className="text-body-sm">
+   993→   993→            Preferred contact
+   994→   994→          </Label>
+   995→   995→          <Select
+   996→   996→            value={form.preferredContactUserId === "" ? PREF_NONE : form.preferredContactUserId}
+   997→   997→            onValueChange={(v) => setForm((f) => ({ ...f, preferredContactUserId: v === PREF_NONE ? "" : v }))}
+   998→   998→          >
+   999→   999→            <SelectTrigger id="pref-contact" className="h-9 w-full text-body-sm" aria-label="Preferred contact">
+  1000→  1000→              <SelectValue placeholder="No preference set" />
+  1001→  1001→            </SelectTrigger>
+  1002→  1002→            <SelectContent>
+  1003→  1003→              <SelectItem value={PREF_NONE}>No preference set</SelectItem>
+  1004→  1004→              {users.map((u) => (
+  1005→  1005→                <SelectItem key={u.id} value={u.id}>
+  1006→  1006→                  {u.name}
+  1007→  1007→                </SelectItem>
+  1008→  1008→              ))}
+  1009→  1009→            </SelectContent>
+  1010→  1010→          </Select>
+  1011→  1011→        </div>
+  1012→  1012→        <div className="space-y-1.5">
+  1013→  1013→          <Label htmlFor="pref-method" className="text-body-sm">
+  1014→  1014→            Preferred contact method
+  1015→  1015→          </Label>
+  1016→  1016→          <Select
+  1017→  1017→            value={form.preferredContactMethod === "" ? PREF_NONE : form.preferredContactMethod}
+  1018→  1018→            onValueChange={(v) => setForm((f) => ({ ...f, preferredContactMethod: v === PREF_NONE ? "" : v }))}
+  1019→  1019→          >
+  1020→  1020→            <SelectTrigger id="pref-method" className="h-9 w-full text-body-sm" aria-label="Preferred contact method">
+  1021→  1021→              <SelectValue placeholder="No preference set" />
+  1022→  1022→            </SelectTrigger>
+  1023→  1023→            <SelectContent>
+  1024→  1024→              <SelectItem value={PREF_NONE}>No preference set</SelectItem>
+  1025→  1025→              {CONTACT_METHODS.map((m) => (
+  1026→  1026→                <SelectItem key={m.value} value={m.value}>
+  1027→  1027→                  {m.label}
+  1028→  1028→                </SelectItem>
+  1029→  1029→              ))}
+  1030→  1030→            </SelectContent>
+  1031→  1031→          </Select>
+  1032→  1032→        </div>
+  1033→  1033→        <div className="space-y-1.5 sm:col-span-2">
+  1034→  1034→          <Label htmlFor="pref-delivery" className="flex items-center gap-1.5 text-body-sm">
+  1035→  1035→            <Phone className="size-3" aria-hidden /> Delivery instructions
+  1036→  1036→          </Label>
+  1037→  1037→          <Textarea
+  1038→  1038→            id="pref-delivery"
+  1039→  1039→            rows={3}
+  1040→  1040→            value={form.deliveryInstructions}
+  1041→  1041→            onChange={(e) => setForm((f) => ({ ...f, deliveryInstructions: e.target.value }))}
+  1042→  1042→            placeholder="e.g. Dock 3 before 10am, receiving hours 8:00 to 15:00, call on arrival"
+  1043→  1043→            className="leading-relaxed"
+  1044→  1044→            maxLength={1000}
+  1045→  1045→          />
+  1046→  1046→        </div>
+  1047→  1047→        <div className="space-y-1.5 sm:col-span-2">
+  1048→  1048→          <Label htmlFor="pref-commonly" className="text-body-sm">
+  1049→  1049→            Commonly ordered
+  1050→  1050→          </Label>
+  1051→  1051→          <Input
+  1052→  1052→            id="pref-commonly"
+  1053→  1053→            value={form.commonlyOrderedNote}
+  1054→  1054→            onChange={(e) => setForm((f) => ({ ...f, commonlyOrderedNote: e.target.value }))}
+  1055→  1055→            placeholder="e.g. Carton 12×8×8 white, 2-3 pallets monthly"
+  1056→  1056→            className="h-9 text-body-sm"
+  1057→  1057→            maxLength={200}
+  1058→  1058→          />
+  1059→  1059→        </div>
+  1060→  1060→      </div>
+  1061→  1061→      <div className="mt-3 flex items-center justify-between gap-3 border-t pt-3">
+  1062→  1062→        <p className="text-caption text-muted-foreground">
+  1063→  1063→          Internal only.
+  1064→  1064→        </p>
+  1065→  1065→        <Button size="sm" className="gap-1.5" disabled={!dirty || save.isPending} onClick={() => save.mutate()}>
+  1066→  1066→          <Save className="size-3.5" aria-hidden />
+  1067→  1067→          {save.isPending ? "Saving…" : "Save preferences"}
+  1068→  1068→        </Button>
+  1069→  1069→      </div>
+  1070→  1070→    </SectionCard>
+  1071→  1071→  );
+  1072→  1072→}
+  1073→  1073→

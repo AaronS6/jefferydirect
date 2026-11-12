@@ -1,0 +1,762 @@
+     1→"use client";
+     2→
+     3→// Settings — account overview (read-mostly), shipping addresses, notification
+     4→// preferences, and password change. Billing fields are admin-managed and
+     5→// clearly labelled as such.
+     6→
+     7→import { useState } from "react";
+     8→import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+     9→import {
+    10→  Building2,
+    11→  Check,
+    12→  KeyRound,
+    13→  Loader2,
+    14→  MapPin,
+    15→  Pencil,
+    16→  Plus,
+    17→  ShieldCheck,
+    18→  Trash2,
+    19→} from "lucide-react";
+    20→import { Badge } from "@/components/ui/badge";
+    21→import { Button } from "@/components/ui/button";
+    22→import { Input } from "@/components/ui/input";
+    23→import { Label } from "@/components/ui/label";
+    24→import { Switch } from "@/components/ui/switch";
+    25→import { Skeleton } from "@/components/ui/skeleton";
+    26→import { Separator } from "@/components/ui/separator";
+    27→import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+    28→import {
+    29→  Dialog,
+    30→  DialogContent,
+    31→  DialogDescription,
+    32→  DialogFooter,
+    33→  DialogHeader,
+    34→  DialogTitle,
+    35→} from "@/components/ui/dialog";
+    36→import {
+    37→  AlertDialog,
+    38→  AlertDialogAction,
+    39→  AlertDialogCancel,
+    40→  AlertDialogContent,
+    41→  AlertDialogDescription,
+    42→  AlertDialogFooter,
+    43→  AlertDialogHeader,
+    44→  AlertDialogTitle,
+    45→} from "@/components/ui/alert-dialog";
+    46→import { PageHeader } from "@/components/shared/page-header";
+    47→import { api } from "@/lib/api-client";
+    48→import { toast } from "@/hooks/use-toast";
+    49→import { ErrorAlert, DetailRow, SectionCard } from "./portal-bits";
+    50→
+    51→type AccountAddress = {
+    52→  id: string;
+    53→  label: string;
+    54→  line1: string;
+    55→  line2: string | null;
+    56→  city: string;
+    57→  province: string;
+    58→  postal: string;
+    59→  isDefault: boolean;
+    60→};
+    61→
+    62→type AccountPayload = {
+    63→  organization: {
+    64→    code: string;
+    65→    name: string;
+    66→    billingLine1: string;
+    67→    billingCity: string;
+    68→    billingProvince: string;
+    69→    billingPostal: string;
+    70→    phone: string;
+    71→  } | null;
+    72→  addresses: AccountAddress[];
+    73→  notifyPrefs: Record<string, boolean>;
+    74→  user: { email: string; name: string; title: string | null; phone: string | null };
+    75→};
+    76→
+    77→type AddressPutPayload = { id?: string; label: string; line1: string; line2: string | null; city: string; province: string; postal: string };
+    78→
+    79→const NOTIFY_PREFS: { key: string; label: string; description: string }[] = [
+    80→  {
+    81→    key: "orderUpdates",
+    82→    label: "Order updates",
+    83→    description: "Confirmations, production progress, dispatch and delivery notices.",
+    84→  },
+    85→  {
+    86→    key: "quoteUpdates",
+    87→    label: "Quotation updates",
+    88→    description: "When a requested quotation is issued, revised or expiring.",
+    89→  },
+    90→  {
+    91→    key: "documents",
+    92→    label: "Documents",
+    93→    description: "New invoices, statements and specifications filed to your account.",
+    94→  },
+    95→  {
+    96→    key: "messages",
+    97→    label: "Messages & support",
+    98→    description: "Replies to your support messages.",
+    99→  },
+   100→];
+   101→
+   102→const EMPTY_ADDRESS = { label: "", line1: "", line2: "", city: "", province: "", postal: "" };
+   103→
+   104→export function SettingsView() {
+   105→  const queryClient = useQueryClient();
+   106→
+   107→  const { data: account, isLoading, error, refetch } = useQuery({
+   108→    queryKey: ["customer-account"],
+   109→    queryFn: () => api.get<AccountPayload>("/api/customer/account"),
+   110→  });
+   111→
+   112→  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["customer-account"] });
+   113→
+   114→  const mutateError = (err: unknown) =>
+   115→    err instanceof Error ? err.message : "We could not save your change. Please try again.";
+   116→
+   117→  if (error) {
+   118→    return (
+   119→      <div>
+   120→        <PageHeader title="Settings" description="Your account and preferences." />
+   121→        <ErrorAlert message="We could not load your account." onRetry={() => refetch()} />
+   122→      </div>
+   123→    );
+   124→  }
+   125→
+   126→  if (isLoading || !account) {
+   127→    return (
+   128→      <div>
+   129→        <PageHeader title="Settings" description="Your account and preferences." />
+   130→        <div className="space-y-5">
+   131→          <Skeleton className="h-10 w-72" />
+   132→          <div className="rounded-lg border bg-card p-4 sm:p-5">
+   133→            <Skeleton className="h-4 w-40" />
+   134→            <div className="mt-3 space-y-2.5">
+   135→              {Array.from({ length: 5 }).map((_, i) => (
+   136→                <Skeleton key={i} className="h-4 w-full max-w-md" />
+   137→              ))}
+   138→            </div>
+   139→          </div>
+   140→        </div>
+   141→      </div>
+   142→    );
+   143→  }
+   144→
+   145→  return (
+   146→    <div>
+   147→      <PageHeader
+   148→        title="Settings"
+   149→        description="Your account details, shipping addresses, notification preferences and password."
+   150→      />
+   151→
+   152→      <Tabs defaultValue="account" className="gap-5">
+   153→        <TabsList className="grid h-auto w-full grid-cols-2 sm:w-auto sm:grid-cols-4">
+   154→          <TabsTrigger value="account">Account</TabsTrigger>
+   155→          <TabsTrigger value="addresses">Shipping addresses</TabsTrigger>
+   156→          <TabsTrigger value="notifications">Notifications</TabsTrigger>
+   157→          <TabsTrigger value="security">Security</TabsTrigger>
+   158→        </TabsList>
+   159→
+   160→        <TabsContent value="account" className="mt-0">
+   161→          <AccountTab account={account} onDone={invalidate} mutateError={mutateError} />
+   162→        </TabsContent>
+   163→        <TabsContent value="addresses" className="mt-0">
+   164→          <AddressesTab addresses={account.addresses} onDone={invalidate} mutateError={mutateError} />
+   165→        </TabsContent>
+   166→        <TabsContent value="notifications" className="mt-0">
+   167→          <NotificationsTab prefs={account.notifyPrefs} onDone={invalidate} mutateError={mutateError} />
+   168→        </TabsContent>
+   169→        <TabsContent value="security" className="mt-0">
+   170→          <SecurityTab mutateError={mutateError} />
+   171→        </TabsContent>
+   172→      </Tabs>
+   173→    </div>
+   174→  );
+   175→}
+   176→
+   177→// ─── Account tab ──────────────────────────────────────────────────────────────
+   178→
+   179→function AccountTab({
+   180→  account,
+   181→  onDone,
+   182→  mutateError,
+   183→}: {
+   184→  account: AccountPayload;
+   185→  onDone: () => void;
+   186→  mutateError: (err: unknown) => string;
+   187→}) {
+   188→  const [phone, setPhone] = useState(account.user.phone ?? "");
+   189→  const [phoneError, setPhoneError] = useState<string | null>(null);
+   190→
+   191→  const phoneMutation = useMutation({
+   192→    mutationFn: () => api.put<{ ok: boolean }>("/api/customer/account", { phone: phone.trim() }),
+   193→    onSuccess: () => {
+   194→      onDone();
+   195→      setPhoneError(null);
+   196→      toast({ title: "Contact phone updated", description: "Our team now has your latest number." });
+   197→    },
+   198→    onError: (err) => setPhoneError(mutateError(err)),
+   199→  });
+   200→
+   201→  return (
+   202→    <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+   203→      <SectionCard
+   204→        title="Account overview"
+   205→        description="Your organization on file with Jeffery Group."
+   206→        contentClassName="p-0 sm:p-0"
+   207→      >
+   208→        <dl className="m-0 px-4 py-2 sm:px-5">
+   209→          <DetailRow label="Business name">{account.organization?.name}</DetailRow>
+   210→          <DetailRow label="Customer code">
+   211→            <span className="font-mono text-[12.5px]">{account.organization?.code}</span>
+   212→          </DetailRow>
+   213→          <DetailRow label="Contact person">
+   214→            {account.user.name}
+   215→            {account.user.title ? <span className="text-muted-foreground"> · {account.user.title}</span> : null}
+   216→          </DetailRow>
+   217→          <DetailRow label="Email">{account.user.email}</DetailRow>
+   218→          <DetailRow label="Billing address">
+   219→            {account.organization ? (
+   220→              <span className="leading-relaxed">
+   221→                {account.organization.billingLine1}
+   222→                <br />
+   223→                {account.organization.billingCity}, {account.organization.billingProvince}{" "}
+   224→                {account.organization.billingPostal}
+   225→              </span>
+   226→            ) : null}
+   227→          </DetailRow>
+   228→          <DetailRow label="Company phone">{account.organization?.phone}</DetailRow>
+   229→        </dl>
+   230→        <div className="flex items-start gap-2.5 border-t bg-muted/30 px-4 py-3 text-[12.5px] leading-relaxed text-muted-foreground sm:px-5">
+   231→          <ShieldCheck className="mt-0.5 size-4 shrink-0" aria-hidden />
+   232→          <p>
+   233→            Managed by Jeffery Group — contact your account manager to change your business details or
+   234→            billing address.
+   235→          </p>
+   236→        </div>
+   237→      </SectionCard>
+   238→
+   239→      <SectionCard title="Your contact phone" description="The number our team calls about order and delivery questions.">
+   240→        <div className="max-w-sm space-y-3">
+   241→          <div className="space-y-2">
+   242→            <Label htmlFor="settings-phone">Phone number</Label>
+   243→            <div className="relative">
+   244→              <MapPin className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+   245→              <Input
+   246→                id="settings-phone"
+   247→                className="pl-9"
+   248→                maxLength={40}
+   249→                placeholder="(416) 555-0183"
+   250→                value={phone}
+   251→                onChange={(e) => setPhone(e.target.value)}
+   252→                disabled={phoneMutation.isPending}
+   253→              />
+   254→            </div>
+   255→          </div>
+   256→          {phoneError && (
+   257→            <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3.5 py-2.5 text-[13px] text-red-700">
+   258→              {phoneError}
+   259→            </div>
+   260→          )}
+   261→          <Button
+   262→            className="gap-2"
+   263→            onClick={() => phoneMutation.mutate()}
+   264→            disabled={phoneMutation.isPending || phone.trim() === (account.user.phone ?? "")}
+   265→          >
+   266→            {phoneMutation.isPending ? (
+   267→              <>
+   268→                <Loader2 className="size-4 animate-spin" aria-hidden /> Saving…
+   269→              </>
+   270→            ) : (
+   271→              <>
+   272→                <Check className="size-4" aria-hidden /> Save phone
+   273→              </>
+   274→            )}
+   275→          </Button>
+   276→        </div>
+   277→      </SectionCard>
+   278→    </div>
+   279→  );
+   280→}
+   281→
+   282→// ─── Addresses tab ───────────────────────────────────────────────────────────
+   283→
+   284→function AddressesTab({
+   285→  addresses,
+   286→  onDone,
+   287→  mutateError,
+   288→}: {
+   289→  addresses: AccountAddress[];
+   290→  onDone: () => void;
+   291→  mutateError: (err: unknown) => string;
+   292→}) {
+   293→  const [dialog, setDialog] = useState<{ mode: "edit"; address: AccountAddress } | { mode: "add" } | null>(null);
+   294→  const [form, setForm] = useState(EMPTY_ADDRESS);
+   295→  const [formError, setFormError] = useState<string | null>(null);
+   296→  const [removing, setRemoving] = useState<AccountAddress | null>(null);
+   297→
+   298→  const saveMutation = useMutation({
+   299→    mutationFn: (next: AddressPutPayload[]) =>
+   300→      api.put<{ ok: boolean }>("/api/customer/account", { addresses: next }),
+   301→    onSuccess: () => {
+   302→      onDone();
+   303→      setDialog(null);
+   304→      setRemoving(null);
+   305→      setFormError(null);
+   306→      toast({ title: "Shipping addresses updated" });
+   307→    },
+   308→    onError: (err) => setFormError(mutateError(err)),
+   309→  });
+   310→
+   311→  const toPayload = (a: AccountAddress): AddressPutPayload => ({
+   312→    id: a.id,
+   313→    label: a.label,
+   314→    line1: a.line1,
+   315→    line2: a.line2,
+   316→    city: a.city,
+   317→    province: a.province,
+   318→    postal: a.postal,
+   319→  });
+   320→
+   321→  function openEdit(a: AccountAddress) {
+   322→    setDialog({ mode: "edit", address: a });
+   323→    setFormError(null);
+   324→    setForm({ label: a.label, line1: a.line1, line2: a.line2 ?? "", city: a.city, province: a.province, postal: a.postal });
+   325→  }
+   326→
+   327→  function openAdd() {
+   328→    setDialog({ mode: "add" });
+   329→    setFormError(null);
+   330→    setForm(EMPTY_ADDRESS);
+   331→  }
+   332→
+   333→  function save(e: React.FormEvent) {
+   334→    e.preventDefault();
+   335→    if (!form.label.trim() || !form.line1.trim() || !form.city.trim() || !form.province.trim() || !form.postal.trim()) {
+   336→      setFormError("Label, street, city, province and postal code are required.");
+   337→      return;
+   338→    }
+   339→    if (addresses.length >= 12 && dialog?.mode === "add") {
+   340→      setFormError("An account can hold at most 12 shipping addresses.");
+   341→      return;
+   342→    }
+   343→    setFormError(null);
+   344→    if (dialog?.mode === "edit") {
+   345→      const next = addresses.map((a) => (a.id === dialog.address.id
+   346→        ? {
+   347→            id: a.id,
+   348→            label: form.label.trim(),
+   349→            line1: form.line1.trim(),
+   350→            line2: form.line2.trim() || null,
+   351→            city: form.city.trim(),
+   352→            province: form.province.trim(),
+   353→            postal: form.postal.trim(),
+   354→          }
+   355→        : toPayload(a)));
+   356→      saveMutation.mutate(next);
+   357→    } else {
+   358→      const next = [
+   359→        ...addresses.map(toPayload),
+   360→        {
+   361→          label: form.label.trim(),
+   362→          line1: form.line1.trim(),
+   363→          line2: form.line2.trim() || null,
+   364→          city: form.city.trim(),
+   365→          province: form.province.trim(),
+   366→          postal: form.postal.trim(),
+   367→        },
+   368→      ];
+   369→      saveMutation.mutate(next);
+   370→    }
+   371→  }
+   372→
+   373→  const editing = dialog?.mode === "edit" ? dialog.address : null;
+   374→
+   375→  return (
+   376→    <SectionCard
+   377→      title="Shipping addresses"
+   378→      description="Where orders can be delivered. Your default address is preselected when ordering; pick another at checkout."
+   379→      actions={
+   380→        <Button variant="outline" size="sm" className="gap-1.5" onClick={openAdd}>
+   381→          <Plus className="size-3.5" aria-hidden /> Add address
+   382→        </Button>
+   383→      }
+   384→    >
+   385→      {addresses.length === 0 ? (
+   386→        <div className="flex items-start gap-2.5 rounded-md border border-amber-200 bg-amber-50/70 px-4 py-3 text-[13px] text-amber-800">
+   387→          <Building2 className="mt-0.5 size-4 shrink-0" aria-hidden />
+   388→          <p>No shipping addresses on file yet — add one so orders can be delivered to you.</p>
+   389→        </div>
+   390→      ) : (
+   391→        <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+   392→          {addresses.map((a) => (
+   393→            <li key={a.id} className="rounded-lg border bg-card p-4 transition-colors hover:border-primary/25">
+   394→              <div className="flex items-start justify-between gap-3">
+   395→                <div className="min-w-0">
+   396→                  <p className="flex items-center gap-2 text-[13.5px] font-medium">
+   397→                    {a.label}
+   398→                    {a.isDefault && <Badge variant="outline" className="px-1.5 text-[10.5px]">Default</Badge>}
+   399→                  </p>
+   400→                  <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
+   401→                    {a.line1}
+   402→                    {a.line2 ? <>, {a.line2}</> : null}
+   403→                    <br />
+   404→                    {a.city}, {a.province} {a.postal}
+   405→                  </p>
+   406→                </div>
+   407→                <Button
+   408→                  variant="ghost"
+   409→                  size="icon"
+   410→                  className="size-8 shrink-0 text-muted-foreground hover:text-foreground"
+   411→                  onClick={() => openEdit(a)}
+   412→                  aria-label={`Edit ${a.label} address`}
+   413→                >
+   414→                  <Pencil className="size-4" aria-hidden />
+   415→                </Button>
+   416→              </div>
+   417→            </li>
+   418→          ))}
+   419→        </ul>
+   420→      )}
+   421→      <p className="mt-4 text-[12px] leading-relaxed text-muted-foreground">
+   422→        Canada only in this environment. Addresses replace your full set on save — your account manager is
+   423→        notified of changes.
+   424→      </p>
+   425→
+   426→      {/* Edit / add dialog */}
+   427→      <Dialog open={dialog !== null} onOpenChange={(o) => !o && setDialog(null)}>
+   428→        <DialogContent className="sm:max-w-[520px]">
+   429→          <DialogHeader>
+   430→            <DialogTitle>{editing ? `Edit “${editing.label}”` : "Add a shipping address"}</DialogTitle>
+   431→            <DialogDescription>
+   432→              {editing
+   433→                ? "Update the label or delivery details. Your other addresses are untouched."
+   434→                : "New addresses become available at checkout immediately."}
+   435→            </DialogDescription>
+   436→          </DialogHeader>
+   437→          <form onSubmit={save} className="space-y-4">
+   438→            <div className="space-y-2">
+   439→              <Label htmlFor="addr-label">Label</Label>
+   440→              <Input
+   441→                id="addr-label"
+   442→                maxLength={80}
+   443→                placeholder="e.g. Second Store — Danforth"
+   444→                value={form.label}
+   445→                onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))}
+   446→              />
+   447→            </div>
+   448→            <div className="space-y-2">
+   449→              <Label htmlFor="addr-line1">Street address</Label>
+   450→              <Input
+   451→                id="addr-line1"
+   452→                maxLength={160}
+   453→                placeholder="1082 Danforth Avenue"
+   454→                value={form.line1}
+   455→                onChange={(e) => setForm((f) => ({ ...f, line1: e.target.value }))}
+   456→              />
+   457→            </div>
+   458→            <div className="space-y-2">
+   459→              <Label htmlFor="addr-line2">Unit / line 2 (optional)</Label>
+   460→              <Input
+   461→                id="addr-line2"
+   462→                maxLength={80}
+   463→                value={form.line2}
+   464→                onChange={(e) => setForm((f) => ({ ...f, line2: e.target.value }))}
+   465→              />
+   466→            </div>
+   467→            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+   468→              <div className="space-y-2">
+   469→                <Label htmlFor="addr-city">City</Label>
+   470→                <Input
+   471→                  id="addr-city"
+   472→                  maxLength={80}
+   473→                  value={form.city}
+   474→                  onChange={(e) => setForm((f) => ({ ...f, city: e.target.value }))}
+   475→                />
+   476→              </div>
+   477→              <div className="space-y-2">
+   478→                <Label htmlFor="addr-province">Province</Label>
+   479→                <Input
+   480→                  id="addr-province"
+   481→                  maxLength={40}
+   482→                  placeholder="ON"
+   483→                  value={form.province}
+   484→                  onChange={(e) => setForm((f) => ({ ...f, province: e.target.value }))}
+   485→                />
+   486→              </div>
+   487→              <div className="space-y-2">
+   488→                <Label htmlFor="addr-postal">Postal code</Label>
+   489→                <Input
+   490→                  id="addr-postal"
+   491→                  maxLength={20}
+   492→                  placeholder="M4C 1V2"
+   493→                  value={form.postal}
+   494→                  onChange={(e) => setForm((f) => ({ ...f, postal: e.target.value }))}
+   495→                />
+   496→              </div>
+   497→            </div>
+   498→            {formError && (
+   499→              <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3.5 py-2.5 text-[13px] text-red-700">
+   500→                {formError}
+   501→              </div>
+   502→            )}
+   503→            <DialogFooter className="gap-2">
+   504→              {editing && (
+   505→                <Button
+   506→                  type="button"
+   507→                  variant="destructive"
+   508→                  className="mr-auto gap-1.5"
+   509→                  onClick={() => {
+   510→                    setRemoving(editing);
+   511→                    setDialog(null);
+   512→                  }}
+   513→                >
+   514→                  <Trash2 className="size-4" aria-hidden /> Remove
+   515→                </Button>
+   516→              )}
+   517→              <Button type="button" variant="outline" onClick={() => setDialog(null)} disabled={saveMutation.isPending}>
+   518→                Cancel
+   519→              </Button>
+   520→              <Button type="submit" disabled={saveMutation.isPending} className="gap-2">
+   521→                {saveMutation.isPending ? (
+   522→                  <>
+   523→                    <Loader2 className="size-4 animate-spin" aria-hidden /> Saving…
+   524→                  </>
+   525→                ) : (
+   526→                  <>
+   527→                    <Check className="size-4" aria-hidden /> Save address
+   528→                  </>
+   529→                )}
+   530→              </Button>
+   531→            </DialogFooter>
+   532→          </form>
+   533→        </DialogContent>
+   534→      </Dialog>
+   535→
+   536→      {/* Remove confirm */}
+   537→      <AlertDialog open={removing !== null} onOpenChange={(o) => !o && setRemoving(null)}>
+   538→        <AlertDialogContent>
+   539→          <AlertDialogHeader>
+   540→            <AlertDialogTitle>Remove “{removing?.label}”?</AlertDialogTitle>
+   541→            <AlertDialogDescription>
+   542→              This address will no longer be available at checkout. Orders already submitted to it are
+   543→              unaffected.
+   544→            </AlertDialogDescription>
+   545→          </AlertDialogHeader>
+   546→          <AlertDialogFooter>
+   547→            <AlertDialogCancel>Keep address</AlertDialogCancel>
+   548→            <AlertDialogAction
+   549→              className="bg-red-600 text-white hover:bg-red-700 focus-visible:ring-red-600 sm:bg-red-600 sm:text-white sm:hover:bg-red-700"
+   550→              onClick={() => {
+   551→                if (removing) {
+   552→                  saveMutation.mutate(addresses.filter((a) => a.id !== removing.id).map(toPayload));
+   553→                }
+   554→              }}
+   555→            >
+   556→              <Trash2 className="size-4" aria-hidden />
+   557→              Remove address
+   558→            </AlertDialogAction>
+   559→          </AlertDialogFooter>
+   560→        </AlertDialogContent>
+   561→      </AlertDialog>
+   562→    </SectionCard>
+   563→  );
+   564→}
+   565→
+   566→// ─── Notifications tab ────────────────────────────────────────────────────────
+   567→
+   568→function NotificationsTab({
+   569→  prefs,
+   570→  onDone,
+   571→  mutateError,
+   572→}: {
+   573→  prefs: Record<string, boolean>;
+   574→  onDone: () => void;
+   575→  mutateError: (err: unknown) => string;
+   576→}) {
+   577→  const [values, setValues] = useState<Record<string, boolean>>(() => {
+   578→    const initial: Record<string, boolean> = {};
+   579→    for (const p of NOTIFY_PREFS) initial[p.key] = prefs[p.key] ?? true;
+   580→    return initial;
+   581→  });
+   582→  const [error, setError] = useState<string | null>(null);
+   583→
+   584→  const dirty = NOTIFY_PREFS.some((p) => (values[p.key] ?? true) !== (prefs[p.key] ?? true));
+   585→
+   586→  const prefsMutation = useMutation({
+   587→    mutationFn: () =>
+   588→      api.put<{ ok: boolean }>("/api/customer/account", {
+   589→        notifyPrefs: {
+   590→          orderUpdates: values.orderUpdates ?? true,
+   591→          quoteUpdates: values.quoteUpdates ?? true,
+   592→          documents: values.documents ?? true,
+   593→          messages: values.messages ?? true,
+   594→        },
+   595→      }),
+   596→    onSuccess: () => {
+   597→      onDone();
+   598→      setError(null);
+   599→      toast({ title: "Notification preferences saved" });
+   600→    },
+   601→    onError: (err) => setError(mutateError(err)),
+   602→  });
+   603→
+   604→  return (
+   605→    <SectionCard
+   606→      title="Notification preferences"
+   607→      description="Choose which updates reach your notification centre and email summary."
+   608→      className="max-w-2xl"
+   609→    >
+   610→      <ul className="space-y-1">
+   611→        {NOTIFY_PREFS.map((p) => (
+   612→          <li key={p.key} className="flex items-start justify-between gap-4 border-b border-border/60 py-3.5 last:border-b-0">
+   613→            <div className="min-w-0">
+   614→              <p className="text-[13.5px] font-medium text-foreground">{p.label}</p>
+   615→              <p className="mt-0.5 text-[12.5px] leading-relaxed text-muted-foreground">{p.description}</p>
+   616→            </div>
+   617→            <div className="flex shrink-0 items-center">
+   618→              <Switch
+   619→                id={`pref-${p.key}`}
+   620→                checked={values[p.key] ?? true}
+   621→                onCheckedChange={(v) => setValues((s) => ({ ...s, [p.key]: v }))}
+   622→                disabled={prefsMutation.isPending}
+   623→                aria-label={`${p.label} notifications`}
+   624→              />
+   625→            </div>
+   626→          </li>
+   627→        ))}
+   628→      </ul>
+   629→      {error && (
+   630→        <div role="alert" className="mt-3 rounded-md border border-red-200 bg-red-50 px-3.5 py-2.5 text-[13px] text-red-700">
+   631→          {error}
+   632→        </div>
+   633→      )}
+   634→      <div className="mt-4">
+   635→        <Button className="gap-2" onClick={() => prefsMutation.mutate()} disabled={prefsMutation.isPending || !dirty}>
+   636→          {prefsMutation.isPending ? (
+   637→            <>
+   638→              <Loader2 className="size-4 animate-spin" aria-hidden /> Saving…
+   639→            </>
+   640→          ) : (
+   641→            <>
+   642→              <Check className="size-4" aria-hidden /> Save preferences
+   643→            </>
+   644→          )}
+   645→        </Button>
+   646→      </div>
+   647→    </SectionCard>
+   648→  );
+   649→}
+   650→
+   651→// ─── Security tab ──────────────────────────────────────────────────────────────
+   652→
+   653→function SecurityTab({ mutateError }: { mutateError: (err: unknown) => string }) {
+   654→  const [current, setCurrent] = useState("");
+   655→  const [next, setNext] = useState("");
+   656→  const [confirm, setConfirm] = useState("");
+   657→  const [error, setError] = useState<string | null>(null);
+   658→
+   659→  const pwMutation = useMutation({
+   660→    mutationFn: () =>
+   661→      api.put<{ ok: boolean }>("/api/customer/account/password", {
+   662→        currentPassword: current,
+   663→        newPassword: next,
+   664→      }),
+   665→    onSuccess: () => {
+   666→      setCurrent("");
+   667→      setNext("");
+   668→      setConfirm("");
+   669→      setError(null);
+   670→      toast({
+   671→        title: "Password updated",
+   672→        description: "Use your new password the next time you sign in to ClientHub.",
+   673→      });
+   674→    },
+   675→    onError: (err) => setError(mutateError(err)),
+   676→  });
+   677→
+   678→  function submit(e: React.FormEvent) {
+   679→    e.preventDefault();
+   680→    if (next.length < 8) {
+   681→      setError("New password must be at least 8 characters.");
+   682→      return;
+   683→    }
+   684→    if (next !== confirm) {
+   685→      setError("New passwords do not match.");
+   686→      return;
+   687→    }
+   688→    if (next === current) {
+   689→      setError("Choose a password different from your current one.");
+   690→      return;
+   691→    }
+   692→    setError(null);
+   693→    pwMutation.mutate();
+   694→  }
+   695→
+   696→  return (
+   697→    <SectionCard
+   698→      title="Password"
+   699→      description="Update the password you use to sign in to ClientHub."
+   700→      className="max-w-2xl"
+   701→    >
+   702→      <form onSubmit={submit} className="max-w-sm space-y-4">
+   703→        <div className="space-y-2">
+   704→          <Label htmlFor="pw-current">Current password</Label>
+   705→          <Input
+   706→            id="pw-current"
+   707→            type="password"
+   708→            autoComplete="current-password"
+   709→            value={current}
+   710→            onChange={(e) => setCurrent(e.target.value)}
+   711→            disabled={pwMutation.isPending}
+   712→            required
+   713→          />
+   714→        </div>
+   715→        <Separator />
+   716→        <div className="space-y-2">
+   717→          <Label htmlFor="pw-new">New password</Label>
+   718→          <Input
+   719→            id="pw-new"
+   720→            type="password"
+   721→            autoComplete="new-password"
+   722→            minLength={8}
+   723→            value={next}
+   724→            onChange={(e) => setNext(e.target.value)}
+   725→            disabled={pwMutation.isPending}
+   726→            required
+   727→          />
+   728→          <p className="text-[12px] text-muted-foreground">At least 8 characters.</p>
+   729→        </div>
+   730→        <div className="space-y-2">
+   731→          <Label htmlFor="pw-confirm">Confirm new password</Label>
+   732→          <Input
+   733→            id="pw-confirm"
+   734→            type="password"
+   735→            autoComplete="new-password"
+   736→            value={confirm}
+   737→            onChange={(e) => setConfirm(e.target.value)}
+   738→            disabled={pwMutation.isPending}
+   739→            required
+   740→          />
+   741→        </div>
+   742→        {error && (
+   743→          <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3.5 py-2.5 text-[13px] text-red-700">
+   744→            {error}
+   745→          </div>
+   746→        )}
+   747→        <Button type="submit" className="gap-2" disabled={pwMutation.isPending || !current || !next || !confirm}>
+   748→          {pwMutation.isPending ? (
+   749→            <>
+   750→              <Loader2 className="size-4 animate-spin" aria-hidden /> Updating…
+   751→            </>
+   752→          ) : (
+   753→            <>
+   754→              <KeyRound className="size-4" aria-hidden /> Update password
+   755→            </>
+   756→          )}
+   757→        </Button>
+   758→      </form>
+   759→    </SectionCard>
+   760→  );
+   761→}
+   762→

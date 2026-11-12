@@ -1,0 +1,996 @@
+     1→"use client";
+     2→
+     3→// Order detail — requested vs confirmed information, items (with per-line
+     4→// specs and attachment references), totals, published progress updates,
+     5→// change requests (including counter proposals), status timeline, documents,
+     6→// CSV export / print, and the canonical reorder flow (current pricing only).
+     7→
+     8→import { Fragment, useState } from "react";
+     9→import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+    10→import { motion, useReducedMotion } from "framer-motion";
+    11→import {
+    12→  CalendarClock,
+    13→  Check,
+    14→  ChevronDown,
+    15→  ChevronRight,
+    16→  Download,
+    17→  FilePen,
+    18→  FileText,
+    19→  Loader2,
+    20→  MapPin,
+    21→  MessageSquare,
+    22→  Printer,
+    23→  RefreshCcw,
+    24→  StickyNote,
+    25→  TriangleAlert,
+    26→} from "lucide-react";
+    27→import { Button } from "@/components/ui/button";
+    28→import {
+    29→  AlertDialog,
+    30→  AlertDialogAction,
+    31→  AlertDialogCancel,
+    32→  AlertDialogContent,
+    33→  AlertDialogDescription,
+    34→  AlertDialogFooter,
+    35→  AlertDialogHeader,
+    36→  AlertDialogTitle,
+    37→} from "@/components/ui/alert-dialog";
+    38→import {
+    39→  Dialog,
+    40→  DialogContent,
+    41→  DialogDescription,
+    42→  DialogFooter,
+    43→  DialogHeader,
+    44→  DialogTitle,
+    45→} from "@/components/ui/dialog";
+    46→import {
+    47→  DropdownMenu,
+    48→  DropdownMenuContent,
+    49→  DropdownMenuItem,
+    50→  DropdownMenuTrigger,
+    51→} from "@/components/ui/dropdown-menu";
+    52→import { Separator } from "@/components/ui/separator";
+    53→import { Skeleton } from "@/components/ui/skeleton";
+    54→import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+    55→import { PageHeader } from "@/components/shared/page-header";
+    56→import { Money, MoneyWithCode } from "@/components/shared/money";
+    57→import { StatusBadge, ChangeStatusBadge, OrderSourceBadge } from "@/components/shared/status-badge";
+    58→import { OrderTimeline } from "@/components/shared/order-timeline";
+    59→import { UpdateTimeline } from "@/components/shared/update-timeline";
+    60→import { api, downloadFile } from "@/lib/api-client";
+    61→import { useAppStore, useCartStore } from "@/store/app-store";
+    62→import type { ChangeRequestDto, OrderDetail, OrderHistoryEntry, ReorderDraft } from "@/types";
+    63→import { toast } from "@/hooks/use-toast";
+    64→import { formatDate, formatDateTime } from "@/lib/date";
+    65→import {
+    66→  ORDER_STATUSES,
+    67→  ORDER_STATUS_LABELS,
+    68→  ORDER_SOURCE_LABELS,
+    69→  ORDER_TERMINAL_STATUSES,
+    70→  type ChangeKind,
+    71→} from "@/lib/constants";
+    72→import { cn } from "@/lib/utils";
+    73→import { ErrorAlert, errorMessage, Mono, RowsSkeleton, SectionCard, SummaryItem, Chip } from "./portal-bits";
+    74→import { AttachmentChips, SpecChips } from "./order-builder-bits";
+    75→import { ChangeRequestDialog, changeItemText, type RespondAction } from "./change-request-dialog";
+    76→
+    77→const EASE = [0.22, 1, 0.36, 1] as const;
+    78→
+    79→// Order progress hero — the full nine-step rail at xl and up; a compact
+    80→// progress bar below xl (the vertical timeline below carries full history).
+    81→// Ink dots for completed steps, kraft ring on the current one, hollow future.
+    82→function StatusStepper({ status, history }: { status: string; history: OrderHistoryEntry[] }) {
+    83→  const flow = ORDER_STATUSES;
+    84→  const terminal = ORDER_TERMINAL_STATUSES.includes(status);
+    85→  const currentIdx = flow.indexOf(status as (typeof flow)[number]);
+    86→
+    87→  // Latest history entry per status (ascending order).
+    88→  const latestByStatus = new Map<string, OrderHistoryEntry>();
+    89→  for (const h of [...history].sort((a, b) => a.createdAt.localeCompare(b.createdAt))) {
+    90→    latestByStatus.set(h.status, h);
+    91→  }
+    92→
+    93→  const progress =
+    94→    currentIdx >= 0 ? Math.round(((currentIdx + 1) / flow.length) * 100) : 100;
+    95→  const dead = status === "CANCELLED" || status === "REJECTED";
+    96→
+    97→  return (
+    98→    <>
+    99→      {/* Compact progress — below xl */}
+   100→      <div className="flex flex-wrap items-center gap-x-4 gap-y-2.5 xl:hidden" aria-label="Order progress">
+   101→        <span
+   102→          aria-hidden
+   103→          className={cn(
+   104→            "flex size-[14px] shrink-0 items-center justify-center rounded-full",
+   105→            dead
+   106→              ? "border-2 border-[var(--status-danger-dot)] bg-[var(--status-danger-bg)]"
+   107→              : terminal
+   108→                ? "bg-foreground"
+   109→                : "border-2 border-kraft-strong bg-kraft",
+   110→          )}
+   111→        >
+   112→          {!dead && !terminal && <span className="size-1.5 rounded-full bg-background" aria-hidden />}
+   113→          {terminal && <span className="size-[4.5px] rounded-full bg-background" aria-hidden />}
+   114→        </span>
+   115→        <p className="text-body font-semibold text-foreground">
+   116→          {ORDER_STATUS_LABELS[status] ?? status}
+   117→        </p>
+   118→        {!dead && (
+   119→          <p className="text-caption text-muted-foreground">
+   120→            <span className="tnum">Step {Math.max(1, currentIdx + 1)} of {flow.length}</span>
+   121→          </p>
+   122→        )}
+   123→        <div className="h-1.5 min-w-24 flex-1 overflow-hidden rounded-full bg-secondary" aria-hidden>
+   124→          <div
+   125→            className={cn("h-full rounded-full transition-[width] duration-500", dead ? "bg-[var(--status-danger-dot)]" : "bg-kraft-strong")}
+   126→            style={{ width: `${dead ? 100 : progress}%` }}
+   127→          />
+   128→        </div>
+   129→      </div>
+   130→
+   131→      {/* Full rail — xl and up */}
+   132→      <ol className="hidden items-start xl:flex" aria-label="Order progress steps">
+   133→        {flow.map((s, i) => {
+   134→          const entry = latestByStatus.get(s);
+   135→          const done = i < currentIdx || (terminal && entry !== undefined);
+   136→          const current = i === currentIdx && !terminal;
+   137→          return (
+   138→            <li
+   139→              key={s}
+   140→              className="relative flex min-w-[96px] flex-1 basis-0 flex-col items-center gap-2.5 px-1 text-center"
+   141→            >
+   142→              {i < flow.length - 1 && (
+   143→                <span
+   144→                  aria-hidden
+   145→                  className={cn(
+   146→                    "absolute top-[7px] left-[calc(50%+10px)] h-px w-[calc(100%-20px)]",
+   147→                    done || current ? "bg-foreground/25" : "bg-border",
+   148→                  )}
+   149→                />
+   150→              )}
+   151→              <span
+   152→                className={cn(
+   153→                  "relative z-10 flex size-[14px] shrink-0 items-center justify-center rounded-full",
+   154→                  done
+   155→                    ? "bg-foreground"
+   156→                    : current
+   157→                      ? "border-2 border-kraft-strong bg-kraft"
+   158→                      : "border border-border bg-card",
+   159→                )}
+   160→              >
+   161→                {done && <span className="size-[4.5px] rounded-full bg-background" aria-hidden />}
+   162→              </span>
+   163→              <div className="min-w-0 max-w-full">
+   164→                <p
+   165→                  className={cn(
+   166→                    "text-caption max-w-full truncate whitespace-nowrap",
+   167→                    current
+   168→                      ? "font-semibold text-foreground"
+   169→                      : done
+   170→                        ? "font-medium text-foreground/80"
+   171→                        : "font-medium text-muted-foreground",
+   172→                  )}
+   173→                >
+   174→                  {ORDER_STATUS_LABELS[s]}
+   175→                </p>
+   176→                {entry && (
+   177→                  <p className="tnum text-caption whitespace-nowrap text-muted-foreground">
+   178→                    {formatDate(entry.createdAt)}
+   179→                  </p>
+   180→                )}
+   181→              </div>
+   182→            </li>
+   183→          );
+   184→        })}
+   185→      </ol>
+   186→    </>
+   187→  );
+   188→}
+   189→
+   190→const QUICK_CHANGE_KINDS: { kind: ChangeKind; label: string }[] = [
+   191→  { kind: "QUANTITY", label: "Quantity" },
+   192→  { kind: "SPEC", label: "Specifications" },
+   193→  { kind: "ADD", label: "Add/remove products" },
+   194→  { kind: "ADDRESS", label: "Delivery address" },
+   195→  { kind: "DATE", label: "Delivery date" },
+   196→  { kind: "CANCEL", label: "Cancel order" },
+   197→];
+   198→
+   199→export function OrderDetailView({ orderId }: { orderId: string }) {
+   200→  const back = useAppStore((s) => s.back);
+   201→  const navigate = useAppStore((s) => s.navigate);
+   202→  const loadDraft = useCartStore((s) => s.loadDraft);
+   203→  const queryClient = useQueryClient();
+   204→  const reduce = useReducedMotion();
+   205→  const enter = {
+   206→    initial: { opacity: 0, y: reduce ? 0 : 8 },
+   207→    animate: { opacity: 1, y: 0 },
+   208→    transition: { duration: 0.22, ease: EASE },
+   209→  };
+   210→
+   211→  const [confirmOpen, setConfirmOpen] = useState(false);
+   212→  const [unavailableDraft, setUnavailableDraft] = useState<ReorderDraft | null>(null);
+   213→  const [reorderError, setReorderError] = useState<string | null>(null);
+   214→  const [changeOpen, setChangeOpen] = useState(false);
+   215→  const [changeKind, setChangeKind] = useState<ChangeKind | undefined>(undefined);
+   216→
+   217→  const { data: order, isLoading, error, refetch } = useQuery({
+   218→    queryKey: ["orders", "detail", orderId],
+   219→    queryFn: () => api.get<OrderDetail>(`/api/customer/orders/${orderId}`),
+   220→  });
+   221→
+   222→  const reorderMutation = useMutation({
+   223→    mutationFn: () => api.get<ReorderDraft>(`/api/customer/orders/${orderId}/reorder-data`),
+   224→    onSuccess: (draft) => {
+   225→      if (draft.lines.some((l) => l.unavailable)) {
+   226→        setUnavailableDraft(draft);
+   227→      } else {
+   228→        finishReorder(draft);
+   229→      }
+   230→    },
+   231→    onError: (err) =>
+   232→      setReorderError(err instanceof Error ? err.message : "We could not load reorder data."),
+   233→  });
+   234→
+   235→  const exportMutation = useMutation({
+   236→    mutationFn: (orderNumber: string) =>
+   237→      downloadFile(`/api/customer/orders/${orderId}/export`, `${orderNumber}.csv`),
+   238→    onSuccess: () =>
+   239→      toast({ title: "Order exported", description: "A CSV copy has been downloaded." }),
+   240→    onError: (err) =>
+   241→      toast({
+   242→        title: "Export failed",
+   243→        description: errorMessage(err, "Please try again."),
+   244→        variant: "destructive",
+   245→      }),
+   246→  });
+   247→
+   248→  function finishReorder(draft: ReorderDraft) {
+   249→    const available = draft.lines.filter((l) => !l.unavailable);
+   250→    if (available.length === 0) {
+   251→      setUnavailableDraft(draft);
+   252→      return;
+   253→    }
+   254→    loadDraft(available);
+   255→    queryClient.invalidateQueries({ queryKey: ["orders"] });
+   256→    toast({
+   257→      title: `Items from ${draft.sourceOrderNumber} added to your cart`,
+   258→      description: "Priced at your current effective rates — review quantities and submit when ready.",
+   259→    });
+   260→    navigate("cart");
+   261→  }
+   262→
+   263→  if (error) {
+   264→    return (
+   265→      <motion.div {...enter}>
+   266→        <PageHeader title="Order" eyebrow="Orders" onBack={back} />
+   267→        <ErrorAlert
+   268→          message={error instanceof Error ? error.message : "We could not load this order."}
+   269→          onRetry={() => refetch()}
+   270→        />
+   271→        <div className="mt-4">
+   272→          <Button variant="outline" onClick={() => navigate("orders")}>
+   273→            Back to orders
+   274→          </Button>
+   275→        </div>
+   276→      </motion.div>
+   277→    );
+   278→  }
+   279→
+   280→  if (isLoading || !order) {
+   281→    return (
+   282→      <motion.div {...enter}>
+   283→        <PageHeader title="Order" eyebrow="Orders" onBack={back} />
+   284→        <div className="space-y-8">
+   285→          <div className="rounded-[14px] border bg-card p-5 shadow-xs">
+   286→            <Skeleton className="h-4 w-40" />
+   287→            <div className="mt-3 grid grid-cols-1 gap-x-8 sm:grid-cols-3">
+   288→              {Array.from({ length: 6 }).map((_, i) => (
+   289→                <div key={i} className="py-3">
+   290→                  <Skeleton className="h-3 w-24" />
+   291→                  <Skeleton className="mt-1.5 h-4 w-32" />
+   292→                </div>
+   293→              ))}
+   294→            </div>
+   295→          </div>
+   296→          <div className="rounded-[14px] border bg-card p-5 shadow-xs">
+   297→            <RowsSkeleton rows={3} />
+   298→          </div>
+   299→        </div>
+   300→      </motion.div>
+   301→    );
+   302→  }
+   303→
+   304→  const taxRateLabel = `${order.taxRateBp / 100}%`;
+   305→  const terminal = ORDER_TERMINAL_STATUSES.includes(order.status);
+   306→  const totalUnits = order.items.reduce((s, i) => s + i.qty, 0);
+   307→
+   308→  function openChangeDialog(kind?: ChangeKind) {
+   309→    setChangeKind(kind);
+   310→    setChangeOpen(true);
+   311→  }
+   312→
+   313→  return (
+   314→    <motion.div {...enter}>
+   315→      <PageHeader
+   316→        title={<Mono className="text-heading tracking-tight">{order.orderNumber}</Mono>}
+   317→        eyebrow="Order"
+   318→        onBack={back}
+   319→        actions={
+   320→          <>
+   321→            <StatusBadge status={order.status} kind="order" />
+   322→            {(order.estimatedDelivery || order.revisedDeliveryDate) && (
+   323→              <span
+   324→                className={cn(
+   325→                  "inline-flex h-[22px] shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 text-caption font-medium",
+   326→                  order.revisedDeliveryDate
+   327→                    ? "border border-kraft/40 bg-kraft-soft text-kraft-ink"
+   328→                    : "border text-muted-foreground",
+   329→                )}
+   330→                title={
+   331→                  order.revisedDeliveryDate && order.estimatedDelivery
+   332→                    ? `Revised — originally estimated ${formatDate(order.estimatedDelivery)}`
+   333→                    : undefined
+   334→                }
+   335→              >
+   336→                Est. delivery{" "}
+   337→                <span className="tnum font-semibold">
+   338→                  {formatDate(order.revisedDeliveryDate ?? order.estimatedDelivery)}
+   339→                </span>
+   340→                {order.revisedDeliveryDate && <span aria-hidden>· revised</span>}
+   341→              </span>
+   342→            )}
+   343→            {!terminal && (
+   344→              <Button
+   345→                className="gap-2 print:hidden"
+   346→                onClick={() => openChangeDialog()}
+   347→                aria-label="Request a change to this order"
+   348→              >
+   349→                <FilePen className="size-4" aria-hidden />
+   350→                <span className="hidden sm:inline">Request a Change</span>
+   351→              </Button>
+   352→            )}
+   353→            <Button
+   354→              variant="outline"
+   355→              className="gap-2 print:hidden"
+   356→              onClick={() => navigate("support")}
+   357→              aria-label="Message our team about this order"
+   358→            >
+   359→              <MessageSquare className="size-4" aria-hidden />
+   360→              <span className="hidden sm:inline">Message</span>
+   361→            </Button>
+   362→            <DropdownMenu>
+   363→              <DropdownMenuTrigger asChild>
+   364→                <Button variant="outline" className="gap-1.5 print:hidden" aria-label="Export this order">
+   365→                  <Download className="size-4" aria-hidden />
+   366→                  <span className="hidden sm:inline">Export</span>
+   367→                  <ChevronDown className="size-3.5" aria-hidden />
+   368→                </Button>
+   369→              </DropdownMenuTrigger>
+   370→              <DropdownMenuContent align="end">
+   371→                <DropdownMenuItem
+   372→                  disabled={exportMutation.isPending}
+   373→                  onClick={() => exportMutation.mutate(order.orderNumber)}
+   374→                >
+   375→                  {exportMutation.isPending ? (
+   376→                    <Loader2 className="size-4 animate-spin" aria-hidden />
+   377→                  ) : (
+   378→                    <Download className="size-4" aria-hidden />
+   379→                  )}
+   380→                  Download CSV
+   381→                </DropdownMenuItem>
+   382→                <DropdownMenuItem onClick={() => window.print()}>
+   383→                  <Printer className="size-4" aria-hidden />
+   384→                  Print order
+   385→                </DropdownMenuItem>
+   386→              </DropdownMenuContent>
+   387→            </DropdownMenu>
+   388→            {order.items.length > 0 && (
+   389→              <Button
+   390→                className="gap-2 print:hidden"
+   391→                onClick={() => {
+   392→                  setReorderError(null);
+   393→                  setConfirmOpen(true);
+   394→                }}
+   395→              >
+   396→                <RefreshCcw className="size-4" aria-hidden />
+   397→                <span className="hidden sm:inline">Reorder</span>
+   398→              </Button>
+   399→            )}
+   400→          </>
+   401→        }
+   402→      />
+   403→
+   404→      <div className="space-y-8">
+   405→        {/* ── Progress hero — horizontal stepper ── */}
+   406→        <SectionCard className="print:break-inside-avoid">
+   407→          <StatusStepper status={order.status} history={order.history} />
+   408→        </SectionCard>
+   409→
+   410→        {/* Next expected update — only when the team committed to one */}
+   411→        {order.nextUpdateDate && !terminal && (
+   412→          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-[14px] border bg-card px-5 py-3 shadow-xs print:shadow-none">
+   413→            <CalendarClock className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+   414→            <div className="min-w-0 flex-1">
+   415→              <p className="text-micro text-muted-foreground">Next expected update</p>
+   416→              <p className="mt-0.5 text-body-sm leading-relaxed text-foreground">
+   417→                Jeffery Group expects to provide another update regarding this order by{" "}
+   418→                <span className="tnum font-medium">{formatDate(order.nextUpdateDate)}</span>.
+   419→              </p>
+   420→            </div>
+   421→          </div>
+   422→        )}
+   423→
+   424→        {/* ── Summary grid ── */}
+   425→        <SectionCard
+   426→          title="Order details"
+   427→          description="Details you submitted are marked “requested”. Confirmed dates are set by Jeffery Group."
+   428→        >
+   429→          <dl className="m-0 grid grid-cols-1 gap-x-8 sm:grid-cols-2 lg:grid-cols-3">
+   430→            <SummaryItem label="Submitted">{formatDate(order.createdAt)}</SummaryItem>
+   431→            <SummaryItem label="Submitted by">{order.submittedBy}</SummaryItem>
+   432→            {order.poNumber && <SummaryItem label="PO reference">{order.poNumber}</SummaryItem>}
+   433→            {order.requestedDelivery && (
+   434→              <SummaryItem label="Requested delivery (your request)">{order.requestedDelivery}</SummaryItem>
+   435→            )}
+   436→            {order.requestedDeliveryDate && (
+   437→              <SummaryItem label="Requested delivery (your request)">
+   438→                {formatDate(order.requestedDeliveryDate)}
+   439→                <span className="block text-caption text-muted-foreground">
+   440→                  Requested, not guaranteed — Jeffery Group confirms the actual date.
+   441→                </span>
+   442→              </SummaryItem>
+   443→            )}
+   444→            {order.estimatedDispatch && (
+   445→              <SummaryItem label="Estimated dispatch">{formatDate(order.estimatedDispatch)}</SummaryItem>
+   446→            )}
+   447→            {order.estimatedDelivery && (
+   448→              <SummaryItem label="Estimated delivery (confirmed by Jeffery Group)">
+   449→                {formatDate(order.estimatedDelivery)}
+   450→              </SummaryItem>
+   451→            )}
+   452→            {order.revisedDeliveryDate && (
+   453→              <SummaryItem label="Revised delivery estimate">
+   454→                <span className="font-medium text-kraft-ink">{formatDate(order.revisedDeliveryDate)}</span>
+   455→              </SummaryItem>
+   456→            )}
+   457→            {order.actualDeliveryDate && (
+   458→              <SummaryItem label="Delivered on">{formatDate(order.actualDeliveryDate)}</SummaryItem>
+   459→            )}
+   460→            {order.trackingNumber && (
+   461→              <SummaryItem label="Tracking number">
+   462→                <Mono className="text-body-sm">{order.trackingNumber}</Mono>
+   463→              </SummaryItem>
+   464→            )}
+   465→            {order.sourceType !== "PORTAL" && (
+   466→              <SummaryItem label="Order source">
+   467→                <span className="flex flex-wrap items-center gap-2">
+   468→                  <OrderSourceBadge source={order.sourceType} />
+   469→                  <span className="text-caption leading-relaxed text-muted-foreground">
+   470→                    {ORDER_SOURCE_LABELS[order.sourceType] ?? order.sourceType}
+   471→                    {order.recordedByName ? ` · recorded by ${order.recordedByName}` : ""} — your company
+   472→                    placed this order outside ClientHub; we recorded it so you can track it here.
+   473→                  </span>
+   474→                </span>
+   475→              </SummaryItem>
+   476→            )}
+   477→            {order.reorderSource && (
+   478→              <SummaryItem label="Reorder source">Reorder of {order.reorderSource}</SummaryItem>
+   479→            )}
+   480→          </dl>
+   481→        </SectionCard>
+   482→
+   483→        <div className="grid grid-cols-1 gap-8 xl:grid-cols-[minmax(0,1fr)_340px]">
+   484→          {/* ── Main column ── */}
+   485→          <div className="min-w-0 space-y-8">
+   486→            {/* Items */}
+   487→            <SectionCard
+   488→              title="Items"
+   489→              description={`${order.items.length} line${order.items.length === 1 ? "" : "s"} · ${totalUnits.toLocaleString()} units`}
+   490→              contentClassName="p-0 sm:p-0"
+   491→              className="print:break-inside-avoid"
+   492→            >
+   493→              {/* Desktop table */}
+   494→              <div className="hidden md:block">
+   495→                <Table>
+   496→                  <TableHeader>
+   497→                    <TableRow className="hover:bg-transparent">
+   498→                      <TableHead>Product</TableHead>
+   499→                      <TableHead className="text-right">Qty</TableHead>
+   500→                      <TableHead className="text-right">Unit price</TableHead>
+   501→                      <TableHead className="text-right">Line total</TableHead>
+   502→                    </TableRow>
+   503→                  </TableHeader>
+   504→                  <TableBody>
+   505→                    {order.items.map((item) => (
+   506→                      <TableRow key={item.id}>
+   507→                        <TableCell>
+   508→                          <ItemIdentity item={item} navigate={navigate} />
+   509→                          {item.note && (
+   510→                            <span className="mt-0.5 block text-caption text-muted-foreground">{item.note}</span>
+   511→                          )}
+   512→                          <SpecChips specs={item.specs} />
+   513→                          <AttachmentChips attachments={item.attachments} />
+   514→                        </TableCell>
+   515→                        <TableCell className="tnum whitespace-nowrap text-right text-body-sm">{item.qty.toLocaleString()}</TableCell>
+   516→                        <TableCell className="whitespace-nowrap text-right">
+   517→                          {item.productId ? (
+   518→                            <Money cents={item.unitPriceCents} />
+   519→                          ) : (
+   520→                            <span className="text-caption text-muted-foreground">Pricing to be confirmed</span>
+   521→                          )}
+   522→                        </TableCell>
+   523→                        <TableCell className="whitespace-nowrap text-right">
+   524→                          {item.productId ? (
+   525→                            <Money cents={item.lineTotalCents} className="font-medium" />
+   526→                          ) : (
+   527→                            <span className="text-caption text-muted-foreground">—</span>
+   528→                          )}
+   529→                        </TableCell>
+   530→                      </TableRow>
+   531→                    ))}
+   532→                  </TableBody>
+   533→                </Table>
+   534→              </div>
+   535→              {/* Mobile stacked */}
+   536→              <ul className="divide-y md:hidden">
+   537→                {order.items.map((item) => (
+   538→                  <li key={item.id} className="px-5 py-3.5">
+   539→                    <div className="flex items-start justify-between gap-3">
+   540→                      <div className="min-w-0">
+   541→                        <ItemIdentity item={item} navigate={navigate} />
+   542→                        {item.note && (
+   543→                          <span className="mt-0.5 block text-caption text-muted-foreground">{item.note}</span>
+   544→                        )}
+   545→                        <SpecChips specs={item.specs} />
+   546→                        <AttachmentChips attachments={item.attachments} />
+   547→                      </div>
+   548→                      <div className="shrink-0 text-right">
+   549→                        {item.productId ? (
+   550→                          <>
+   551→                            <Money cents={item.lineTotalCents} className="text-body-sm font-semibold" />
+   552→                            <p className="text-caption text-muted-foreground">
+   553→                              <span className="tnum">{item.qty.toLocaleString()}</span> ×{" "}
+   554→                              <Money cents={item.unitPriceCents} muted />
+   555→                            </p>
+   556→                          </>
+   557→                        ) : (
+   558→                          <>
+   559→                            <span className="text-caption text-muted-foreground">Pricing to be confirmed</span>
+   560→                            <p className="text-caption text-muted-foreground">
+   561→                              <span className="tnum">{item.qty.toLocaleString()}</span> units
+   562→                            </p>
+   563→                          </>
+   564→                        )}
+   565→                      </div>
+   566→                    </div>
+   567→                  </li>
+   568→                ))}
+   569→              </ul>
+   570→            </SectionCard>
+   571→
+   572→            {/* Progress updates */}
+   573→            <SectionCard
+   574→              title="Order updates"
+   575→              description="Progress updates published by the Jeffery Group team, newest first."
+   576→              className="print:break-inside-avoid"
+   577→            >
+   578→              <UpdateTimeline updates={order.updates} />
+   579→            </SectionCard>
+   580→
+   581→            {/* Change requests */}
+   582→            {order.changeRequests.length > 0 && (
+   583→              <ChangeRequestsCard orderId={orderId} requests={order.changeRequests} />
+   584→            )}
+   585→
+   586→            {/* Timeline */}
+   587→            <SectionCard title="Status timeline" description="Each update is recorded by the Jeffery Group team.">
+   588→              <OrderTimeline status={order.status} history={order.history} />
+   589→            </SectionCard>
+   590→          </div>
+   591→
+   592→          {/* ── Side rail ── */}
+   593→          <aside className="space-y-8" aria-label="Shipping and documents">
+   594→            <SectionCard title="Totals" className="print:break-inside-avoid">
+   595→              <div className="w-full space-y-1.5">
+   596→                <div className="flex items-baseline justify-between text-body-sm">
+   597→                  <span className="text-muted-foreground">Subtotal</span>
+   598→                  <MoneyWithCode cents={order.subtotalCents} />
+   599→                </div>
+   600→                <div className="flex items-baseline justify-between text-body-sm">
+   601→                  <span className="text-muted-foreground">GST ({taxRateLabel})</span>
+   602→                  <MoneyWithCode cents={order.taxCents} />
+   603→                </div>
+   604→                <Separator className="my-2" />
+   605→                <div className="flex items-baseline justify-between">
+   606→                  <span className="text-body-sm font-medium">Total</span>
+   607→                  <MoneyWithCode cents={order.totalCents} className="font-display text-title font-normal" />
+   608→                </div>
+   609→              </div>
+   610→              <p className="mt-3 text-right text-caption text-pretty text-muted-foreground">
+   611→                Taxes computed at the confirmed rate of {taxRateLabel}, in Canadian dollars.
+   612→                {order.items.some((i) => !i.productId) && " Custom requests are quoted separately."}
+   613→              </p>
+   614→            </SectionCard>
+   615→
+   616→            <SectionCard title="Shipping" className="print:break-inside-avoid">
+   617→              <div className="flex items-start gap-2.5">
+   618→                <MapPin className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+   619→                <p className="text-body-sm leading-relaxed text-foreground">{order.shippingText}</p>
+   620→              </div>
+   621→              {order.notes && (
+   622→                <>
+   623→                  <Separator className="my-4" />
+   624→                  <div className="flex items-start gap-2.5">
+   625→                    <StickyNote className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+   626→                    <div>
+   627→                      <p className="text-micro text-muted-foreground">Notes</p>
+   628→                      <p className="mt-1 whitespace-pre-line text-body-sm leading-relaxed text-foreground">
+   629→                        {order.notes}
+   630→                      </p>
+   631→                    </div>
+   632→                  </div>
+   633→                </>
+   634→              )}
+   635→            </SectionCard>
+   636→
+   637→            {!terminal && (
+   638→              <SectionCard
+   639→                title="Request a change"
+   640→                description="Changes are requests — your order stays unchanged until Jeffery Group approves them."
+   641→                className="print:hidden"
+   642→              >
+   643→                <ul className="space-y-1">
+   644→                  {QUICK_CHANGE_KINDS.map((q) => (
+   645→                    <li key={q.kind}>
+   646→                      <button
+   647→                        type="button"
+   648→                        onClick={() => openChangeDialog(q.kind)}
+   649→                        className="flex w-full items-center justify-between gap-2 rounded-[10px] border bg-card px-3 py-2 text-left text-body-sm font-medium text-foreground transition-colors hover:bg-accent/70 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/35"
+   650→                      >
+   651→                        {q.label}
+   652→                        <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+   653→                      </button>
+   654→                    </li>
+   655→                  ))}
+   656→                </ul>
+   657→              </SectionCard>
+   658→            )}
+   659→
+   660→            {order.documents.length > 0 && (
+   661→              <SectionCard title="Related documents" className="print:break-inside-avoid">
+   662→                <ul className="space-y-2">
+   663→                  {order.documents.map((doc) => (
+   664→                    <li key={doc.id}>
+   665→                      <button
+   666→                        onClick={() => navigate("documents")}
+   667→                        className="flex w-full items-center gap-2.5 rounded-[10px] border bg-card px-3 py-2.5 text-left text-body-sm transition-colors hover:bg-accent/70 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/35"
+   668→                      >
+   669→                        <FileText className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+   670→                        <span className="min-w-0 flex-1 truncate font-medium text-foreground">{doc.title}</span>
+   671→                        <span className="shrink-0 text-caption text-muted-foreground">{doc.sizeLabel}</span>
+   672→                      </button>
+   673→                    </li>
+   674→                  ))}
+   675→                </ul>
+   676→              </SectionCard>
+   677→            )}
+   678→          </aside>
+   679→        </div>
+   680→      </div>
+   681→
+   682→      {/* Change request dialog */}
+   683→      <ChangeRequestDialog
+   684→        open={changeOpen}
+   685→        onOpenChange={setChangeOpen}
+   686→        orderId={orderId}
+   687→        items={order.items.map((i) => ({ productId: i.productId, name: i.name, sku: i.sku, qty: i.qty }))}
+   688→        initialKind={changeKind}
+   689→      />
+   690→
+   691→      {/* Reorder confirm */}
+   692→      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+   693→        <AlertDialogContent>
+   694→          <AlertDialogHeader>
+   695→            <AlertDialogTitle>Reorder {order.orderNumber}?</AlertDialogTitle>
+   696→            <AlertDialogDescription asChild>
+   697→              <div className="space-y-2">
+   698→                <p>
+   699→                  We&apos;ll load the items into your cart at your <strong>current</strong> effective pricing —
+   700→                  historical prices are never reused. Quantities start at your last order; adjust them before
+   701→                  submitting.
+   702→                </p>
+   703→                <p>Any items currently in your cart will be replaced.</p>
+   704→              </div>
+   705→            </AlertDialogDescription>
+   706→          </AlertDialogHeader>
+   707→          {reorderError && (
+   708→            <div
+   709→              role="alert"
+   710→              className="rounded-[10px] bg-[var(--status-danger-bg)] px-3.5 py-2.5 text-body-sm text-[var(--status-danger-fg)]"
+   711→            >
+   712→              {reorderError}
+   713→            </div>
+   714→          )}
+   715→          <AlertDialogFooter>
+   716→            <AlertDialogCancel>Cancel</AlertDialogCancel>
+   717→            <AlertDialogAction
+   718→              onClick={() => {
+   719→                setConfirmOpen(false);
+   720→                reorderMutation.mutate();
+   721→              }}
+   722→            >
+   723→              {reorderMutation.isPending ? (
+   724→                <Loader2 className="size-4 animate-spin" aria-hidden />
+   725→              ) : (
+   726→                <RefreshCcw className="size-4" aria-hidden />
+   727→              )}
+   728→              Load items
+   729→            </AlertDialogAction>
+   730→          </AlertDialogFooter>
+   731→        </AlertDialogContent>
+   732→      </AlertDialog>
+   733→
+   734→      {/* Unavailable items notice */}
+   735→      <Dialog open={unavailableDraft !== null} onOpenChange={(o) => !o && setUnavailableDraft(null)}>
+   736→        <DialogContent className="sm:max-w-[520px]">
+   737→          <DialogHeader>
+   738→            <DialogTitle className="flex items-center gap-2">
+   739→              <TriangleAlert className="size-4.5 text-kraft-ink" aria-hidden />
+   740→              Some items are no longer available
+   741→            </DialogTitle>
+   742→            <DialogDescription>
+   743→              The following products from {unavailableDraft?.sourceOrderNumber} are inactive or no longer
+   744→              approved for your account — they can&apos;t be reordered. Available items will be loaded if you
+   745→              continue.
+   746→            </DialogDescription>
+   747→          </DialogHeader>
+   748→          <ul className="max-h-56 overflow-y-auto overscroll-contain rounded-[10px] border divide-y">
+   749→            {(unavailableDraft?.lines ?? [])
+   750→              .filter((l) => l.unavailable)
+   751→              .map((l) => (
+   752→                <li key={l.productId} className="flex items-center justify-between gap-3 px-3.5 py-2.5 text-body-sm">
+   753→                  <span className="min-w-0">
+   754→                    <span className="block truncate font-medium">{l.name}</span>
+   755→                    <Mono className="text-muted-foreground">{l.sku}</Mono>
+   756→                  </span>
+   757→                  <span className="tnum shrink-0 text-caption text-muted-foreground">
+   758→                    qty {l.qty.toLocaleString()}
+   759→                  </span>
+   760→                </li>
+   761→              ))}
+   762→          </ul>
+   763→          <DialogFooter className="gap-2">
+   764→            <Button variant="outline" onClick={() => setUnavailableDraft(null)}>
+   765→              Cancel reorder
+   766→            </Button>
+   767→            <Button
+   768→              disabled={(unavailableDraft?.lines ?? []).every((l) => l.unavailable)}
+   769→              onClick={() => {
+   770→                if (unavailableDraft) finishReorder(unavailableDraft);
+   771→                setUnavailableDraft(null);
+   772→              }}
+   773→            >
+   774→              <Check className="size-4" aria-hidden />
+   775→              Continue with available items
+   776→            </Button>
+   777→          </DialogFooter>
+   778→        </DialogContent>
+   779→      </Dialog>
+   780→    </motion.div>
+   781→  );
+   782→}
+   783→
+   784→// ─── Items identity (catalogue link vs custom request) ──────────────────────
+   785→
+   786→function ItemIdentity({
+   787→  item,
+   788→  navigate,
+   789→}: {
+   790→  item: { productId: string | null; name: string; sku: string };
+   791→  navigate: ReturnType<typeof useAppStore.getState>["navigate"];
+   792→}) {
+   793→  if (item.productId) {
+   794→    return (
+   795→      <button
+   796→        className="text-left text-body-sm font-semibold underline-offset-2 transition-colors hover:text-primary hover:underline"
+   797→        onClick={() => navigate("product-detail", { id: item.productId ?? "" })}
+   798→      >
+   799→        {item.name}
+   800→        <Mono className="ml-2 block text-muted-foreground">{item.sku}</Mono>
+   801→      </button>
+   802→    );
+   803→  }
+   804→  return (
+   805→    <span className="text-body-sm font-semibold">
+   806→      <span className="flex flex-wrap items-center gap-1.5">
+   807→        {item.name}
+   808→        <Chip>Custom request</Chip>
+   809→      </span>
+   810→      <Mono className="mt-0.5 block text-muted-foreground">{item.sku || "custom"}</Mono>
+   811→    </span>
+   812→  );
+   813→}
+   814→
+   815→// ─── Change requests card ────────────────────────────────────────────────────
+   816→
+   817→function ChangeRequestsCard({
+   818→  orderId,
+   819→  requests,
+   820→}: {
+   821→  orderId: string;
+   822→  requests: ChangeRequestDto[];
+   823→}) {
+   824→  const queryClient = useQueryClient();
+   825→
+   826→  const respondMutation = useMutation({
+   827→    mutationFn: (vars: { id: string; action: RespondAction }) =>
+   828→      api.post<ChangeRequestDto>(`/api/customer/change-requests/${vars.id}/respond`, {
+   829→        action: vars.action,
+   830→      }),
+   831→    onSuccess: (_cr, vars) => {
+   832→      queryClient.invalidateQueries({ queryKey: ["orders"] });
+   833→      queryClient.invalidateQueries({ queryKey: ["orders", "detail", orderId] });
+   834→      queryClient.invalidateQueries({ queryKey: ["customer-dashboard"] });
+   835→      queryClient.invalidateQueries({ queryKey: ["notifications"] });
+   836→      if (vars.action === "ACCEPT") {
+   837→        toast({
+   838→          title: "Proposal accepted",
+   839→          description: "Jeffery Group will apply it to your order — you'll see the change reflected here.",
+   840→        });
+   841→      } else if (vars.action === "DECLINE") {
+   842→        toast({
+   843→          title: "Proposal declined",
+   844→          description: "The original order remains unchanged.",
+   845→        });
+   846→      } else {
+   847→        toast({
+   848→          title: "Request withdrawn",
+   849→          description: "Your order continues exactly as it was.",
+   850→        });
+   851→      }
+   852→    },
+   853→    onError: (err) =>
+   854→      toast({
+   855→        title: "We could not record your response",
+   856→        description: errorMessage(err, "Please try again."),
+   857→        variant: "destructive",
+   858→      }),
+   859→  });
+   860→
+   861→  // Newest-first from the API — render chronologically for the narrative.
+   862→  const chronological = [...requests].reverse();
+   863→
+   864→  return (
+   865→    <SectionCard
+   866→      title="Change requests"
+   867→      description="Requests from your team on this order — nothing changes until Jeffery Group approves them."
+   868→      className="print:break-inside-avoid"
+   869→    >
+   870→      <div className="space-y-3">
+   871→        {chronological.map((cr) => (
+   872→          <ChangeRequestEntry
+   873→            key={cr.id}
+   874→            cr={cr}
+   875→            busy={respondMutation.isPending}
+   876→            onRespond={(id, action) => respondMutation.mutate({ id, action })}
+   877→          />
+   878→        ))}
+   879→      </div>
+   880→    </SectionCard>
+   881→  );
+   882→}
+   883→
+   884→function ChangeRequestEntry({
+   885→  cr,
+   886→  busy,
+   887→  onRespond,
+   888→}: {
+   889→  cr: ChangeRequestDto;
+   890→  busy: boolean;
+   891→  onRespond: (id: string, action: RespondAction) => void;
+   892→}) {
+   893→  return (
+   894→    <article className="rounded-[14px] border bg-card p-5 shadow-xs">
+   895→      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-2">
+   896→        <ChangeStatusBadge status={cr.status} />
+   897→        <span className="text-body-sm text-foreground">requested by {cr.requestedByName}</span>
+   898→        <span className="ml-auto tnum text-caption text-muted-foreground">{formatDateTime(cr.createdAt)}</span>
+   899→      </div>
+   900→
+   901→      <ul className="mt-2.5 space-y-1">
+   902→        {cr.changes.map((c, i) => (
+   903→          <li key={i} className="text-body-sm leading-relaxed text-foreground/90">
+   904→            {changeItemText(c)}
+   905→          </li>
+   906→        ))}
+   907→      </ul>
+   908→
+   909→      {cr.requestNote && (
+   910→        <p className="mt-2 whitespace-pre-line text-caption leading-relaxed text-muted-foreground">
+   911→          <span className="font-medium text-muted-foreground/80">Your note: </span>
+   912→          {cr.requestNote}
+   913→        </p>
+   914→      )}
+   915→
+   916→      {cr.status === "PENDING" && (
+   917→        <div className="mt-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-[10px] border bg-surface-sunken/60 px-3.5 py-2.5">
+   918→          <p className="max-w-md text-caption leading-relaxed text-muted-foreground">
+   919→            Your order stays unchanged until Jeffery Group approves this request.
+   920→          </p>
+   921→          <Button
+   922→            variant="ghost"
+   923→            size="sm"
+   924→            className="h-7 px-2.5 text-caption text-muted-foreground hover:text-foreground"
+   925→            disabled={busy}
+   926→            onClick={() => onRespond(cr.id, "WITHDRAW")}
+   927→          >
+   928→            Withdraw request
+   929→          </Button>
+   930→        </div>
+   931→      )}
+   932→
+   933→      {(cr.status === "ACCEPTED" || cr.status === "DECLINED" || cr.status === "WITHDRAWN") &&
+   934→        (cr.adminName || cr.decidedAt) && (
+   935→          <div className="mt-3 rounded-[10px] border bg-surface-sunken/60 px-3.5 py-2.5 text-caption leading-relaxed">
+   936→            <p className="font-medium text-foreground">
+   937→              {cr.status === "ACCEPTED" ? "Approved" : cr.status === "DECLINED" ? "Declined" : "Withdrawn"}
+   938→              {cr.adminName ? ` by ${cr.adminName}` : ""}
+   939→              {cr.decidedAt ? ` · ${formatDateTime(cr.decidedAt)}` : ""}
+   940→            </p>
+   941→            {cr.decisionNote && <p className="mt-0.5 text-muted-foreground">{cr.decisionNote}</p>}
+   942→            {cr.appliedAt && cr.status === "ACCEPTED" && (
+   943→              <p className="mt-0.5 text-muted-foreground">Applied to your order {formatDateTime(cr.appliedAt)}.</p>
+   944→            )}
+   945→          </div>
+   946→        )}
+   947→
+   948→      {cr.status === "COUNTERED" && (
+   949→        <div className="mt-3 rounded-[10px] border border-kraft/40 bg-kraft-soft/60 p-3.5">
+   950→          <p className="text-micro text-kraft-ink">Jeffery Group proposed an alternative</p>
+   951→          {cr.counter && (
+   952→            <ul className="mt-1.5 space-y-1">
+   953→              {cr.counter.map((c, i) => (
+   954→                <li key={i} className="text-body-sm leading-relaxed text-foreground/90">
+   955→                  {changeItemText(c)}
+   956→                </li>
+   957→              ))}
+   958→            </ul>
+   959→          )}
+   960→          {cr.counterNote && (
+   961→            <p className="mt-1.5 whitespace-pre-line text-caption leading-relaxed text-kraft-ink/80">
+   962→              {cr.counterNote}
+   963→            </p>
+   964→          )}
+   965→          {cr.counterDecision ? (
+   966→            <p className="mt-2 text-caption leading-relaxed text-muted-foreground">
+   967→              You {cr.counterDecision === "ACCEPT" ? "accepted" : "declined"} this proposal
+   968→              {cr.counterDecidedAt ? ` on ${formatDateTime(cr.counterDecidedAt)}` : ""}.
+   969→            </p>
+   970→          ) : (
+   971→            <div className="mt-2.5 flex flex-wrap items-center gap-2">
+   972→              <Button
+   973→                size="sm"
+   974→                className="h-8 gap-1.5"
+   975→                disabled={busy}
+   976→                onClick={() => onRespond(cr.id, "ACCEPT")}
+   977→              >
+   978→                <Check className="size-3.5" aria-hidden /> Accept proposal
+   979→              </Button>
+   980→              <Button
+   981→                variant="outline"
+   982→                size="sm"
+   983→                className="h-8 gap-1.5"
+   984→                disabled={busy}
+   985→                onClick={() => onRespond(cr.id, "DECLINE")}
+   986→              >
+   987→                Decline
+   988→              </Button>
+   989→            </div>
+   990→          )}
+   991→        </div>
+   992→      )}
+   993→    </article>
+   994→  );
+   995→}
+   996→

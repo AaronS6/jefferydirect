@@ -1,0 +1,522 @@
+    42→    42→import { formatDate } from "@/lib/date";
+    43→    43→import { toast } from "@/hooks/use-toast";
+    44→    44→import { DetailRow, ErrorAlert, RowsSkeleton, SectionCard } from "./portal-bits";
+    45→    45→
+    46→    46→type RespondAction = "ACCEPT" | "REJECT" | "REVISION";
+    47→    47→
+    48→    48→function daysUntil(iso: string): number {
+    49→    49→  return Math.ceil((new Date(iso).getTime() - Date.now()) / 86_400_000);
+    50→    50→}
+    51→    51→
+    52→    52→export function QuoteDetailView({ quotationId }: { quotationId: string }) {
+    53→    53→  const back = useAppStore((s) => s.back);
+    54→    54→  const navigate = useAppStore((s) => s.navigate);
+    55→    55→  const queryClient = useQueryClient();
+    56→    56→
+    57→    57→  const [acceptOpen, setAcceptOpen] = useState(false);
+    58→    58→  const [declineOpen, setDeclineOpen] = useState(false);
+    59→    59→  const [revisionOpen, setRevisionOpen] = useState(false);
+    60→    60→  const [convertOpen, setConvertOpen] = useState(false);
+    61→    61→  const [printOpen, setPrintOpen] = useState(false);
+    62→    62→  const [declineReason, setDeclineReason] = useState("");
+    63→    63→  const [revisionComment, setRevisionComment] = useState("");
+    64→    64→  const [actionError, setActionError] = useState<string | null>(null);
+    65→    65→
+    66→    66→  const { data: quote, isLoading, error, refetch } = useQuery({
+    67→    67→    queryKey: ["quotations", "detail", quotationId],
+    68→    68→    queryFn: () => api.get<QuotationDetail>(`/api/customer/quotations/${quotationId}`),
+    69→    69→  });
+    70→    70→
+    71→    71→  const invalidate = () => {
+    72→    72→    queryClient.invalidateQueries({ queryKey: ["quotations"] });
+    73→    73→    queryClient.invalidateQueries({ queryKey: ["customer-dashboard"] });
+    74→    74→    queryClient.invalidateQueries({ queryKey: ["notifications"] });
+    75→    75→  };
+    76→    76→
+    77→    77→  const respondMutation = useMutation({
+    78→    78→    mutationFn: ({ action, comment }: { action: RespondAction; comment?: string }) =>
+    79→    79→      api.post<{ ok: boolean }>(`/api/customer/quotations/${quotationId}/respond`, { action, comment }),
+    80→    80→    onSuccess: (_res, vars) => {
+    81→    81→      invalidate();
+    82→    82→      setAcceptOpen(false);
+    83→    83→      setDeclineOpen(false);
+    84→    84→      setRevisionOpen(false);
+    85→    85→      setDeclineReason("");
+    86→    86→      setRevisionComment("");
+    87→    87→      setActionError(null);
+    88→    88→      if (vars.action === "ACCEPT") {
+    89→    89→        toast({
+    90→    90→          title: "Quotation accepted",
+    91→    91→          description: "Thank you — you can now convert it into an order request when you're ready.",
+    92→    92→        });
+    93→    93→      } else if (vars.action === "REJECT") {
+    94→    94→        toast({ title: "Quotation declined", description: "Our team has been notified of your decision." });
+    95→    95→      } else {
+    96→    96→        toast({
+    97→    97→          title: "Revision requested",
+    98→    98→          description: "Our team will review your comments and issue an updated quotation.",
+    99→    99→        });
+   100→   100→      }
+   101→   101→    },
+   102→   102→    onError: (err) => {
+   103→   103→      const message =
+   104→   104→        err instanceof Error ? err.message : "We could not record your response.";
+   105→   105→      setActionError(message);
+   106→   106→      setAcceptOpen(false);
+   107→   107→      setDeclineOpen(false);
+   108→   108→      setRevisionOpen(false);
+   109→   109→      toast({ title: "We could not record your response.", description: message });
+   110→   110→    },
+   111→   111→  });
+   112→   112→
+   113→   113→  const convertMutation = useMutation({
+   114→   114→    mutationFn: () =>
+   115→   115→      api.post<{ orderId: string; orderNumber: string }>(`/api/customer/quotations/${quotationId}/convert`),
+   116→   116→    onSuccess: (res) => {
+   117→   117→      invalidate();
+   118→   118→      queryClient.invalidateQueries({ queryKey: ["orders"] });
+   119→   119→      setConvertOpen(false);
+   120→   120→      toast({
+   121→   121→        title: "Order request created from quotation",
+   122→   122→        description: `${res.orderNumber} — our order desk will confirm availability and delivery.`,
+   123→   123→      });
+   124→   124→      navigate("order-detail", { id: res.orderId });
+   125→   125→    },
+   126→   126→    onError: (err) => {
+   127→   127→      const message = err instanceof Error ? err.message : "We could not convert this quotation.";
+   128→   128→      setActionError(message);
+   129→   129→      setConvertOpen(false);
+   130→   130→      toast({ title: "We could not convert this quotation.", description: message });
+   131→   131→    },
+   132→   132→  });
+   133→   133→
+   134→   134→  if (error) {
+   135→   135→    return (
+   136→   136→      <div>
+   137→   137→        <PageHeader title="Quotation" eyebrow="Quotations" onBack={back} />
+   138→   138→        <ErrorAlert
+   139→   139→          message={error instanceof Error ? error.message : "We could not load this quotation."}
+   140→   140→          onRetry={() => refetch()}
+   141→   141→        />
+   142→   142→        <div className="mt-4">
+   143→   143→          <Button variant="outline" onClick={() => navigate("quotations")}>
+   144→   144→            Back to quotations
+   145→   145→          </Button>
+   146→   146→        </div>
+   147→   147→      </div>
+   148→   148→    );
+   149→   149→  }
+   150→   150→
+   151→   151→  if (isLoading || !quote) {
+   152→   152→    return (
+   153→   153→      <div>
+   154→   154→        <PageHeader title="Quotation" eyebrow="Quotations" onBack={back} />
+   155→   155→        <div className="space-y-5">
+   156→   156→          <div className="rounded-lg border bg-card p-4 sm:p-5">
+   157→   157→            <RowsSkeleton rows={6} />
+   158→   158→          </div>
+   159→   159→          <div className="rounded-lg border bg-card p-4 sm:p-5">
+   160→   160→            <Skeleton className="h-4 w-40" />
+   161→   161→            <Skeleton className="mt-3 h-40 w-full" />
+   162→   162→          </div>
+   163→   163→        </div>
+   164→   164→      </div>
+   165→   165→    );
+   166→   166→  }
+   167→   167→
+   168→   168→  const issued = quote.items.length > 0 && quote.status !== "REQUESTED" && quote.status !== "UNDER_REVIEW";
+   169→   169→  const expiringSoon =
+   170→   170→    quote.status === "ISSUED" && quote.expiryDate !== null && daysUntil(quote.expiryDate) <= 7;
+   171→   171→
+   172→   172→  return (
+   173→   173→    <div>
+   174→   174→      <PageHeader
+   175→   175→        title={quote.quoteNumber}
+   176→   176→        eyebrow="Quotation"
+   177→   177→        onBack={back}
+   178→   178→        description={quote.title}
+   179→   179→        actions={
+   180→   180→          <>
+   181→   181→            {quote.revision > 0 && (
+   182→   182→              <span className="rounded border bg-muted px-2 py-0.5 text-[11.5px] font-medium text-muted-foreground">
+   183→   183→                Rev {quote.revision}
+   184→   184→              </span>
+   185→   185→            )}
+   186→   186→            <StatusBadge status={quote.status} kind="quote" />
+   187→   187→          </>
+   188→   188→        }
+   189→   189→      />
+   190→   190→
+   191→   191→      {expiringSoon && (
+   192→   192→        <div role="alert" className="mb-5 flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50/70 px-4 py-3 text-[13px] text-amber-800">
+   193→   193→          <TriangleAlert className="mt-0.5 size-4 shrink-0 text-amber-600" aria-hidden />
+   194→   194→          <p>
+   195→   195→            <span className="font-medium">This quotation expires soon</span> — valid until{" "}
+   196→   196→            {formatDate(quote.expiryDate)}. Accepted pricing applies only within the validity period.
+   197→   197→          </p>
+   198→   198→        </div>
+   199→   199→      )}
+   200→   200→
+   201→   201→      <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+   202→   202→        {/* ── Issued quotation ── */}
+   203→   203→        <div className="min-w-0 space-y-5">
+   204→   204→          {issued ? (
+   205→   205→            <SectionCard
+   206→   206→              title="Issued quotation"
+   207→   207→              description={`Issued ${formatDate(quote.issuedAt)}${quote.expiryDate ? ` · valid until ${formatDate(quote.expiryDate)}` : ""} · excludes applicable taxes`}
+   208→   208→              actions={
+   209→   209→                <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setPrintOpen(true)}>
+   210→   210→                  <Printer className="size-3.5" aria-hidden />
+   211→   211→                  Print / Save PDF
+   212→   212→                </Button>
+   213→   213→              }
+   214→   214→              contentClassName="p-0 sm:p-0"
+   215→   215→            >
+   216→   216→              {/* Desktop table */}
+   217→   217→              <div className="hidden md:block">
+   218→   218→                <Table>
+   219→   219→                  <TableHeader>
+   220→   220→                    <TableRow className="hover:bg-transparent">
+   221→   221→                      <TableHead>Description</TableHead>
+   222→   222→                      <TableHead>Type</TableHead>
+   223→   223→                      <TableHead className="text-right">Qty</TableHead>
+   224→   224→                      <TableHead className="text-right">Unit</TableHead>
+   225→   225→                      <TableHead className="text-right">Amount</TableHead>
+   226→   226→                    </TableRow>
+   227→   227→                  </TableHeader>
+   228→   228→                  <TableBody>
+   229→   229→                    {quote.items.map((item) => (
+   230→   230→                      <TableRow key={item.id}>
+   231→   231→                        <TableCell className="text-[13px]">{item.description}</TableCell>
+   232→   232→                        <TableCell className="text-[12.5px] text-muted-foreground">
+   233→   233→                          {QUOTE_ITEM_KIND_LABELS[item.kind] ?? item.kind}
+   234→   234→                        </TableCell>
+   235→   235→                        <TableCell className="tnum text-right text-[13px]">{item.qty.toLocaleString()}</TableCell>
+   236→   236→                        <TableCell className="text-right">
+   237→   237→                          <Money cents={item.unitPriceCents} />
+   238→   238→                        </TableCell>
+   239→   239→                        <TableCell className="text-right">
+   240→   240→                          <Money cents={item.lineTotalCents} className="font-medium" />
+   241→   241→                        </TableCell>
+   242→   242→                      </TableRow>
+   243→   243→                    ))}
+   244→   244→                  </TableBody>
+   245→   245→                </Table>
+   246→   246→              </div>
+   247→   247→              {/* Mobile stacked */}
+   248→   248→              <ul className="divide-y md:hidden">
+   249→   249→                {quote.items.map((item) => (
+   250→   250→                  <li key={item.id} className="flex items-start justify-between gap-3 px-4 py-3 sm:px-5">
+   251→   251→                    <div className="min-w-0">
+   252→   252→                      <p className="text-[13px] leading-snug">{item.description}</p>
+   253→   253→                      <p className="mt-0.5 text-[11.5px] text-muted-foreground">
+   254→   254→                        {QUOTE_ITEM_KIND_LABELS[item.kind] ?? item.kind}
+   255→   255→                      </p>
+   256→   256→                    </div>
+   257→   257→                    <div className="shrink-0 text-right">
+   258→   258→                      <Money cents={item.lineTotalCents} className="text-[13px] font-medium" />
+   259→   259→                      <p className="text-[11.5px] text-muted-foreground">
+   260→   260→                        <span className="tnum">{item.qty.toLocaleString()}</span> ×{" "}
+   261→   261→                        <Money cents={item.unitPriceCents} muted />
+   262→   262→                      </p>
+   263→   263→                    </div>
+   264→   264→                  </li>
+   265→   265→                ))}
+   266→   266→              </ul>
+   267→   267→
+   268→   268→              <div className="border-t bg-muted/20 px-4 py-4 sm:px-5">
+   269→   269→                <div className="ml-auto w-full max-w-xs">
+   270→   270→                  <div className="flex items-baseline justify-between">
+   271→   271→                    <span className="text-[13.5px] font-medium">Quotation total</span>
+   272→   272→                    <MoneyWithCode cents={quote.itemsTotalCents} className="text-[15px] font-semibold" />
+   273→   273→                  </div>
+   274→   274→                  <p className="mt-1.5 text-right text-[11.5px] text-muted-foreground">
+   275→   275→                    Taxes extra, as applicable at invoice.
+   276→   276→                  </p>
+   277→   277→                </div>
+   278→   278→              </div>
+   279→   279→
+   280→   280→              {quote.terms && (
+   281→   281→                <div className="border-t px-4 py-4 sm:px-5">
+   282→   282→                  <p className="text-[11.5px] font-medium uppercase tracking-[0.06em] text-muted-foreground">
+   283→   283→                    Terms &amp; conditions
+   284→   284→                  </p>
+   285→   285→                  <p className="mt-1.5 whitespace-pre-line text-[13px] leading-relaxed text-muted-foreground">
+   286→   286→                    {quote.terms}
+   287→   287→                  </p>
+   288→   288→                </div>
+   289→   289→              )}
+   290→   290→            </SectionCard>
+   291→   291→          ) : (
+   292→   292→            <SectionCard title="Issued quotation">
+   293→   293→              {quote.status === "REQUESTED" || quote.status === "UNDER_REVIEW" ? (
+   294→   294→                <div className="flex items-start gap-2.5 text-[13.5px] text-muted-foreground">
+   295→   295→                  <BadgeCheck className="mt-0.5 size-4 shrink-0" aria-hidden />
+   296→   296→                  <p>
+   297→   297→                    Not issued yet — our estimating team is preparing your quotation. You&apos;ll receive a
+   298→   298→                    notification as soon as it&apos;s ready for review.
+   299→   299→                  </p>
+   300→   300→                </div>
+   301→   301→              ) : (
+   302→   302→                <div className="flex items-start gap-2.5 text-[13.5px] text-muted-foreground">
+   303→   303→                  <BadgeCheck className="mt-0.5 size-4 shrink-0" aria-hidden />
+   304→   304→                  <p>No priced items on this quotation.</p>
+   305→   305→                </div>
+   306→   306→              )}
+   307→   307→            </SectionCard>
+   308→   308→          )}
+   309→   309→
+   310→   310→          {/* ── Decision actions ── */}
+   311→   311→          {quote.status === "ISSUED" && (
+   312→   312→            <SectionCard title="Your decision" description="Accepting records your intent — you can convert to an order request afterwards.">
+   313→   313→              {actionError && (
+   314→   314→                <div role="alert" className="mb-3 rounded-md border border-red-200 bg-red-50 px-3.5 py-2.5 text-[13px] text-red-700">
+   315→   315→                  {actionError}
+   316→   316→                </div>
+   317→   317→              )}
+   318→   318→              <div className="flex flex-wrap gap-2.5">
+   319→   319→                <Button className="gap-2" onClick={() => setAcceptOpen(true)} disabled={respondMutation.isPending}>
+   320→   320→                  <Check className="size-4" aria-hidden />
+   321→   321→                  Accept quotation
+   322→   322→                </Button>
+   323→   323→                <Button
+   324→   324→                  variant="outline"
+   325→   325→                  className="gap-2"
+   326→   326→                  onClick={() => setRevisionOpen(true)}
+   327→   327→                  disabled={respondMutation.isPending}
+   328→   328→                >
+   329→   329→                  <PencilLine className="size-4" aria-hidden />
+   330→   330→                  Request revision
+   331→   331→                </Button>
+   332→   332→                <Button
+   333→   333→                  variant="destructive"
+   334→   334→                  className="gap-2"
+   335→   335→                  onClick={() => setDeclineOpen(true)}
+   336→   336→                  disabled={respondMutation.isPending}
+   337→   337→                >
+   338→   338→                  <ThumbsDown className="size-4" aria-hidden />
+   339→   339→                  Decline
+   340→   340→                </Button>
+   341→   341→              </div>
+   342→   342→            </SectionCard>
+   343→   343→          )}
+   344→   344→
+   345→   345→          {quote.status === "ACCEPTED" && (
+   346→   346→            <SectionCard title="Next step" description="You accepted this quotation — turn it into an order request.">
+   347→   347→              {actionError && (
+   348→   348→                <div role="alert" className="mb-3 rounded-md border border-red-200 bg-red-50 px-3.5 py-2.5 text-[13px] text-red-700">
+   349→   349→                  {actionError}
+   350→   350→                </div>
+   351→   351→              )}
+   352→   352→              <div className="flex flex-wrap items-center gap-3">
+   353→   353→                <Button className="gap-2" onClick={() => setConvertOpen(true)} disabled={convertMutation.isPending}>
+   354→   354→                  {convertMutation.isPending ? (
+   355→   355→                    <Loader2 className="size-4 animate-spin" aria-hidden />
+   356→   356→                  ) : (
+   357→   357→                    <ArrowRight className="size-4" aria-hidden />
+   358→   358→                  )}
+   359→   359→                  Convert to order request
+   360→   360→                </Button>
+   361→   361→                <Button variant="outline" className="gap-2" onClick={() => setPrintOpen(true)}>
+   362→   362→                  <Printer className="size-4" aria-hidden />
+   363→   363→                  Print / Save PDF
+   364→   364→                </Button>
+   365→   365→              </div>
+   366→   366→              <p className="mt-3 text-[12px] leading-relaxed text-muted-foreground">
+   367→   367→                Converting creates a submitted order request at the quoted prices — setup, freight and other
+   368→   368→                charges carry across as separate lines. Our order desk then confirms availability and the
+   369→   369→                delivery date.
+   370→   370→              </p>
+   371→   371→            </SectionCard>
+   372→   372→          )}
+   373→   373→
+   374→   374→          {(quote.status === "EXPIRED" || quote.status === "REJECTED" || quote.status === "REVISED" || quote.status === "CANCELLED") && (
+   375→   375→            <div className="rounded-lg border bg-muted/30 px-4 py-3.5 text-[13px] leading-relaxed text-muted-foreground">
+   376→   376→              {quote.status === "EXPIRED" &&
+   377→   377→                `This quotation expired on ${formatDate(quote.expiryDate)}. Pricing is no longer guaranteed — contact our team or request a new quotation for refreshed pricing.`}
+   378→   378→              {quote.status === "REJECTED" &&
+   379→   379→                `You declined this quotation${quote.respondedAt ? ` on ${formatDate(quote.respondedAt)}` : ""}. Thank you for letting us know — we're happy to quote again whenever you're ready.`}
+   380→   380→              {quote.status === "REVISED" &&
+   381→   381→                "A revision was recorded on this quotation. Our team will issue an updated version, and you'll be notified when it's ready."}
+   382→   382→              {quote.status === "CANCELLED" && "This quotation was cancelled."}
+   383→   383→            </div>
+   384→   384→          )}
+   385→   385→        </div>
+   386→   386→
+   387→   387→        {/* ── Your request rail ── */}
+   388→   388→        <aside className="min-w-0" aria-label="Original quotation request">
+   389→   389→          <SectionCard title="Your request" description={`Submitted by ${quote.requestedBy}`}>
+   390→   390→            <dl className="m-0">
+   391→   391→              <DetailRow label="Request title">{quote.title}</DetailRow>
+   392→   392→              <DetailRow label="Category">{quote.category}</DetailRow>
+   393→   393→              <DetailRow label="Product">{quote.productName}</DetailRow>
+   394→   394→              <DetailRow label="Dimensions">{quote.dimensions}</DetailRow>
+   395→   395→              <DetailRow label="Material">{quote.material}</DetailRow>
+   396→   396→              <DetailRow label="Colour">{quote.colour}</DetailRow>
+   397→   397→              <DetailRow label="Printing">{quote.printing}</DetailRow>
+   398→   398→              <DetailRow label="Quantity">{quote.quantity}</DetailRow>
+   399→   399→              <DetailRow label="Needed by">{quote.neededBy}</DetailRow>
+   400→   400→              <DetailRow label="Destination">{quote.destination}</DetailRow>
+   401→   401→              <DetailRow label="Specs">{quote.specs}</DetailRow>
+   402→   402→              <DetailRow label="Comments">{quote.comments}</DetailRow>
+   403→   403→            </dl>
+   404→   404→            <Separator className="my-4" />
+   405→   405→            <dl className="m-0">
+   406→   406→              <DetailRow label="Requested">{formatDate(quote.createdAt)}</DetailRow>
+   407→   407→              {quote.respondedAt && (
+   408→   408→                <DetailRow label="Your response">
+   409→   409→                  {formatDate(quote.respondedAt)}
+   410→   410→                  {quote.respondedNote && (
+   411→   411→                    <span className="block whitespace-pre-line text-[12.5px] text-muted-foreground">
+   412→   412→                      {quote.respondedNote}
+   413→   413→                    </span>
+   414→   414→                  )}
+   415→   415→                </DetailRow>
+   416→   416→              )}
+   417→   417→            </dl>
+   418→   418→          </SectionCard>
+   419→   419→        </aside>
+   420→   420→      </div>
+   421→   421→
+   422→   422→      {/* Accept confirm */}
+   423→   423→      <AlertDialog open={acceptOpen} onOpenChange={setAcceptOpen}>
+   424→   424→        <AlertDialogContent>
+   425→   425→          <AlertDialogHeader>
+   426→   426→            <AlertDialogTitle>Accept quotation {quote.quoteNumber}?</AlertDialogTitle>
+   427→   427→            <AlertDialogDescription>
+   428→   428→              Accepting records your decision with our team. The quoted prices become the basis for your
+   429→   429→              order request, valid until {formatDate(quote.expiryDate)}.
+   430→   430→            </AlertDialogDescription>
+   431→   431→          </AlertDialogHeader>
+   432→   432→          <AlertDialogFooter>
+   433→   433→            <AlertDialogCancel disabled={respondMutation.isPending}>Not now</AlertDialogCancel>
+   434→   434→            <AlertDialogAction
+   435→   435→              disabled={respondMutation.isPending}
+   436→   436→              onClick={() => respondMutation.mutate({ action: "ACCEPT" })}
+   437→   437→            >
+   438→   438→              Accept
+   439→   439→            </AlertDialogAction>
+   440→   440→          </AlertDialogFooter>
+   441→   441→        </AlertDialogContent>
+   442→   442→      </AlertDialog>
+   443→   443→
+   444→   444→      {/* Decline confirm + optional reason */}
+   445→   445→      <AlertDialog open={declineOpen} onOpenChange={setDeclineOpen}>
+   446→   446→        <AlertDialogContent>
+   447→   447→          <AlertDialogHeader>
+   448→   448→            <AlertDialogTitle>Decline quotation {quote.quoteNumber}?</AlertDialogTitle>
+   449→   449→            <AlertDialogDescription asChild>
+   450→   450→              <div className="space-y-3">
+   451→   451→                <p>
+   452→   452→                  Letting us know helps the team close the request. An optional reason is shared with our
+   453→   453→                  estimating team to improve future quotes.
+   454→   454→                </p>
+   455→   455→                <div className="space-y-2">
+   456→   456→                  <Label htmlFor="decline-reason">Reason (optional)</Label>
+   457→   457→                  <Textarea
+   458→   458→                    id="decline-reason"
+   459→   459→                    rows={3}
+   460→   460→                    maxLength={2000}
+   461→   461→                    placeholder="e.g. Timing no longer works for us"
+   462→   462→                    value={declineReason}
+   463→   463→                    onChange={(e) => setDeclineReason(e.target.value)}
+   464→   464→                  />
+   465→   465→                </div>
+   466→   466→              </div>
+   467→   467→            </AlertDialogDescription>
+   468→   468→          </AlertDialogHeader>
+   469→   469→          <AlertDialogFooter>
+   470→   470→            <AlertDialogCancel disabled={respondMutation.isPending}>Keep quotation</AlertDialogCancel>
+   471→   471→            <AlertDialogAction
+   472→   472→              className="bg-red-600 text-white hover:bg-red-700 focus-visible:ring-red-600 sm:bg-red-600 sm:text-white sm:hover:bg-red-700"
+   473→   473→              disabled={respondMutation.isPending}
+   474→   474→              onClick={() => respondMutation.mutate({ action: "REJECT", comment: declineReason.trim() || undefined })}
+   475→   475→            >
+   476→   476→              Decline quotation
+   477→   477→            </AlertDialogAction>
+   478→   478→          </AlertDialogFooter>
+   479→   479→        </AlertDialogContent>
+   480→   480→      </AlertDialog>
+   481→   481→
+   482→   482→      {/* Request revision */}
+   483→   483→      <Dialog open={revisionOpen} onOpenChange={setRevisionOpen}>
+   484→   484→        <DialogContent className="sm:max-w-[480px]">
+   485→   485→          <DialogHeader>
+   486→   486→            <DialogTitle>Request a revision</DialogTitle>
+   487→   487→            <DialogDescription>
+   488→   488→              Tell our estimating team what to change — quantity, material, delivery, terms. We&apos;ll issue
+   489→   489→              an updated quotation.
+   490→   490→            </DialogDescription>
+   491→   491→          </DialogHeader>
+   492→   492→          <div className="space-y-2">
+   493→   493→            <Label htmlFor="revision-comment">What should change?</Label>
+   494→   494→            <Textarea
+   495→   495→              id="revision-comment"
+   496→   496→              rows={4}
+   497→   497→              maxLength={2000}
+   498→   498→              placeholder="e.g. Can we look at 3,000 units instead, with freight to the Danforth location?"
+   499→   499→              value={revisionComment}
+   500→   500→              onChange={(e) => setRevisionComment(e.target.value)}
+   501→   501→            />
+   502→   502→          </div>
+   503→   503→          {actionError && (
+   504→   504→            <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3.5 py-2.5 text-[13px] text-red-700">
+   505→   505→              {actionError}
+   506→   506→            </div>
+   507→   507→          )}
+   508→   508→          <DialogFooter className="gap-2">
+   509→   509→            <Button variant="outline" onClick={() => setRevisionOpen(false)} disabled={respondMutation.isPending}>
+   510→   510→              Cancel
+   511→   511→            </Button>
+   512→   512→            <Button
+   513→   513→              disabled={respondMutation.isPending || revisionComment.trim().length === 0}
+   514→   514→              onClick={() => respondMutation.mutate({ action: "REVISION", comment: revisionComment.trim() })}
+   515→   515→            >
+   516→   516→              {respondMutation.isPending ? (
+   517→   517→                <Loader2 className="size-4 animate-spin" aria-hidden />
+   518→   518→              ) : (
+   519→   519→                <PencilLine className="size-4" aria-hidden />
+   520→   520→              )}
+   521→   521→              Send revision request
+   522→   522→            </Button>
+   523→   523→          </DialogFooter>
+   524→   524→        </DialogContent>
+   525→   525→      </Dialog>
+   526→   526→
+   527→   527→      {/* Convert confirm */}
+   528→   528→      <AlertDialog open={convertOpen} onOpenChange={setConvertOpen}>
+   529→   529→        <AlertDialogContent>
+   530→   530→          <AlertDialogHeader>
+   531→   531→            <AlertDialogTitle>Convert {quote.quoteNumber} to an order request?</AlertDialogTitle>
+   532→   532→            <AlertDialogDescription>
+   533→   533→              We&apos;ll create a submitted order request at the quoted prices — product lines carry across
+   534→   534→              with their quoted rates, and setup, freight and other charges appear as separate lines. Our
+   535→   535→              order desk then confirms availability and delivery before anything is produced.
+   536→   536→            </AlertDialogDescription>
+   537→   537→          </AlertDialogHeader>
+   538→   538→          {actionError && (
+   539→   539→            <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3.5 py-2.5 text-[13px] text-red-700">
+   540→   540→              {actionError}
+   541→   541→            </div>
+   542→   542→          )}
+   543→   543→          <AlertDialogFooter>
+   544→   544→            <AlertDialogCancel disabled={convertMutation.isPending}>Not yet</AlertDialogCancel>
+   545→   545→            <AlertDialogAction
+   546→   546→              disabled={convertMutation.isPending}
+   547→   547→              onClick={() => convertMutation.mutate()}
+   548→   548→            >
+   549→   549→              <ArrowRight className="size-4" aria-hidden />
+   550→   550→              Create order request
+   551→   551→            </AlertDialogAction>
+   552→   552→          </AlertDialogFooter>
+   553→   553→        </AlertDialogContent>
+   554→   554→      </AlertDialog>
+   555→   555→
+   556→   556→      {/* Print / save as PDF */}
+   557→   557→      <Dialog open={printOpen} onOpenChange={setPrintOpen}>
+   558→   558→        <DialogContent className="max-h-[92vh] max-w-3xl overflow-y-auto bg-background p-0">
+   559→   559→          <DialogHeader className="border-b px-5 py-4">
+   560→   560→            <DialogTitle>Quotation preview</DialogTitle>
+   561→   561→            <DialogDescription>
+
+[showing lines 42-561 of 582; use offset=562 with limit to continue reading]

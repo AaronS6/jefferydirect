@@ -1,0 +1,1384 @@
+     1→// ClientHub seed — clearly identified DEMONSTRATION data for evaluation.
+     2→// Replace with real business records when going live.
+     3→//
+     4→//   bun run prisma/seed.ts
+     5→//
+     6→// Demo credentials (also shown on the login screen):
+     7→//   Admin:    admin@jefferygroup.com / Jeffery2024!
+     8→//   Customer: maria@mapleleafpizzeria.ca / Client2024!
+     9→//             daniel@harvestfood.ca     / Client2024!
+    10→//             sofia@pacificbakehouse.ca/ Client2024!
+    11→
+    12→import { PrismaClient } from "@prisma/client";
+    13→import { hashPassword } from "../src/lib/server/crypto";
+    14→
+    15→const db = new PrismaClient();
+    16→
+    17→const DAY = 24 * 60 * 60 * 1000;
+    18→const daysAgo = (n: number, hours = 0) => new Date(Date.now() - n * DAY + hours * 60 * 60 * 1000);
+    19→const daysFromNow = (n: number) => new Date(Date.now() + n * DAY);
+    20→const TAX_BP = 500; // 5% GST (demo)
+    21→
+    22→function totals(items: { qty: number; unitPriceCents: number }[]) {
+    23→  const subtotal = items.reduce((s, i) => s + i.qty * i.unitPriceCents, 0);
+    24→  const tax = Math.round((subtotal * TAX_BP) / 10_000);
+    25→  return { subtotal, tax, total: subtotal + tax };
+    26→}
+    27→
+    28→async function main() {
+    29→  console.log("Seeding ClientHub demo data…");
+    30→
+    31→  // Wipe in FK-safe order
+    32→  await db.auditLog.deleteMany();
+    33→  await db.notification.deleteMany();
+    34→  await db.message.deleteMany();
+    35→  await db.document.deleteMany();
+    36→  await db.quotationItem.deleteMany();
+    37→  await db.quotation.deleteMany();
+    38→  await db.orderStatusHistory.deleteMany();
+    39→  await db.orderItem.deleteMany();
+    40→  await db.order.deleteMany();
+    41→  await db.customerPrice.deleteMany();
+    42→  await db.productAccess.deleteMany();
+    43→  await db.product.deleteMany();
+    44→  await db.category.deleteMany();
+    45→  await db.address.deleteMany();
+    46→  await db.user.deleteMany();
+    47→  await db.organization.deleteMany();
+    48→
+    49→  // ─── Categories ────────────────────────────────────────────────────────────
+    50→  const cats = await Promise.all(
+    51→    [
+    52→      ["Corrugated Packaging", "corrugated", "Shipping cartons, mailers and heavy-duty boxes"],
+    53→      ["Pizza Boxes", "pizza-boxes", "Corrugated pizza boxes in standard and custom prints"],
+    54→      ["Food Packaging", "food-packaging", "Bags, wraps, soup cups and takeaway packaging"],
+    55→      ["PET Containers", "pet-containers", "Clear PET clamshells and cold cups"],
+    56→      ["PP Containers", "pp-containers", "Polypropylene deli containers and bowls"],
+    57→      ["Custom Printed Packaging", "custom-printed", "Bespoke printed packaging programs"],
+    58→    ].map(([name, slug, description], i) =>
+    59→      db.category.create({ data: { name, slug, description, sortOrder: i } }),
+    60→    ),
+    61→  );
+    62→  const catId = Object.fromEntries(cats.map((c) => [c.slug, c.id]));
+    63→
+    64→  // ─── Products ──────────────────────────────────────────────────────────────
+    65→  type P = {
+    66→    sku: string;
+    67→    name: string;
+    68→    cat: string;
+    69→    short: string;
+    70→    desc: string;
+    71→    material: string;
+    72→    dims: string;
+    73→    colour: string;
+    74→    printing: string;
+    75→    casePack: number;
+    76→    palletPack?: number;
+    77→    moq: number;
+    78→    increment: number;
+    79→    unit: string;
+    80→    price: number | null;
+    81→    stock: string;
+    82→    lead?: string;
+    83→  };
+    84→
+    85→  const products: P[] = [
+    86→    {
+    87→      sku: "JG-CB-1208",
+    88→      name: "Regular Slotted Carton 12 × 8 × 8 in",
+    89→      cat: "corrugated",
+    90→      short: "Single-wall kraft RSC shipping carton, sold per unit.",
+    91→      desc: "Classic regular slotted container in 32 ECT kraft board. A dependable everyday shipping carton suitable for light-to-medium goods. Available flat-packed in bundles of 50.",
+    92→      material: "Single-wall corrugated kraft, 32 ECT",
+    93→      dims: "12 × 8 × 8 in (305 × 203 × 203 mm)",
+    94→      colour: "Natural kraft",
+    95→      printing: "Flexo printing available on request",
+    96→      casePack: 50,
+    97→      palletPack: 400,
+    98→      moq: 100,
+    99→      increment: 50,
+   100→      unit: "each",
+   101→      price: 89,
+   102→      stock: "IN_STOCK",
+   103→    },
+   104→    {
+   105→      sku: "JG-CB-1612",
+   106→      name: "Heavy-Duty Carton 16 × 12 × 10 in",
+   107→      cat: "corrugated",
+   108→      short: "Double-wall heavy-duty carton for dense loads.",
+   109→      desc: "Double-wall (48 ECT) kraft carton engineered for heavier consignments. Stronger burst and stacking strength for industrial and food-service distribution.",
+   110→      material: "Double-wall corrugated kraft, 48 ECT",
+   111→      dims: "16 × 12 × 10 in (406 × 305 × 254 mm)",
+   112→      colour: "Natural kraft",
+   113→      printing: "Flexo printing available on request",
+   114→      casePack: 25,
+   115→      palletPack: 150,
+   116→      moq: 50,
+   117→      increment: 25,
+   118→      unit: "each",
+   119→      price: 142,
+   120→      stock: "IN_STOCK",
+   121→    },
+   122→    {
+   123→      sku: "JG-CB-MAI4",
+   124→      name: "White Mailer Carton 10 × 7 × 4 in",
+   125→      cat: "corrugated",
+   126→      short: "Clean white mailer for retail-ready shipments.",
+   127→      desc: "Smooth white outside / kraft inside mailer carton. Popular with bakeries and retailers for a premium unboxing presentation without custom print costs.",
+   128→      material: "Single-wall corrugated, white outside / kraft inside",
+   129→      dims: "10 × 7 × 4 in (254 × 178 × 102 mm)",
+   130→      colour: "White",
+   131→      printing: "Flexo printing available on request",
+   132→      casePack: 100,
+   133→      palletPack: 800,
+   134→      moq: 250,
+   135→      increment: 100,
+   136→      unit: "each",
+   137→      price: 54,
+   138→      stock: "IN_STOCK",
+   139→    },
+   140→    {
+   141→      sku: "JG-CB-PALS",
+   142→      name: "Pallet Sleeve Box 48 × 40 × 36 in",
+   143→      cat: "corrugated",
+   144→      short: "Heavy-duty pallet sleeve box for bulk handling.",
+   145→      desc: "Reusable-style corrugated pallet sleeve box for bulk produce and industrial distribution. Produced to order in configurable board grades.",
+   146→      material: "Double-wall corrugated kraft",
+   147→      dims: "48 × 40 × 36 in (1219 × 1016 × 914 mm)",
+   148→      colour: "Natural kraft",
+   149→      printing: "Flexo printing available on request",
+   150→      casePack: 1,
+   151→      moq: 5,
+   152→      increment: 1,
+   153→      unit: "each",
+   154→      price: 1275,
+   155→      stock: "MADE_TO_ORDER",
+   156→      lead: "Produced in 10–14 business days after confirmation",
+   157→    },
+   158→    {
+   159→      sku: "JG-PZ-10",
+   160→      name: '10" Corrugated Pizza Box',
+   161→      cat: "pizza-boxes",
+   162→      short: "Standard 10-inch pizza box, lock-corner, kraft.",
+   163→      desc: "10-inch corrugated pizza box with lock-corner construction. Venting options and grease resistance suitable for hot-holding. Sold per box, bundled 100 per case.",
+   164→      material: "Single-wall corrugated kraft",
+   165→      dims: '10 × 10 × 1.75 in',
+   166→      colour: "Natural kraft",
+   167→      printing: "1–4 colour flexo available on volume orders",
+   168→      casePack: 100,
+   169→      palletPack: 1200,
+   170→      moq: 500,
+   171→      increment: 100,
+   172→      unit: "each",
+   173→      price: 42,
+   174→      stock: "IN_STOCK",
+   175→    },
+   176→    {
+   177→      sku: "JG-PZ-12",
+   178→      name: '12" Corrugated Pizza Box',
+   179→      cat: "pizza-boxes",
+   180→      short: "Standard 12-inch pizza box, lock-corner, kraft.",
+   181→      desc: "Our best-selling 12-inch corrugated pizza box. Lock-corner assembly, stacked strength tested for delivery. Bundled 100 per case, pallets of 1,000.",
+   182→      material: "Single-wall corrugated kraft",
+   183→      dims: '12 × 12 × 1.75 in',
+   184→      colour: "Natural kraft",
+   185→      printing: "1–4 colour flexo available on volume orders",
+   186→      casePack: 100,
+   187→      palletPack: 1000,
+   188→      moq: 500,
+   189→      increment: 100,
+   190→      unit: "each",
+   191→      price: 51,
+   192→      stock: "IN_STOCK",
+   193→    },
+   194→    {
+   195→      sku: "JG-PZ-14",
+   196→      name: '14" Corrugated Pizza Box',
+   197→      cat: "pizza-boxes",
+   198→      short: "Oversize 14-inch pizza box for family sizes.",
+   199→      desc: "14-inch corrugated pizza box for extra-large and family-size pizzas. Same lock-corner construction as our 10 and 12 inch ranges.",
+   200→      material: "Single-wall corrugated kraft",
+   201→      dims: '14 × 14 × 2 in',
+   202→      colour: "Natural kraft",
+   203→      printing: "1–4 colour flexo available on volume orders",
+   204→      casePack: 100,
+   205→      palletPack: 900,
+   206→      moq: 500,
+   207→      increment: 100,
+   208→      unit: "each",
+   209→      price: 58,
+   210→      stock: "IN_STOCK",
+   211→    },
+   212→    {
+   213→      sku: "JG-PZ-CP",
+   214→      name: "Custom Printed Pizza Boxes",
+   215→      cat: "pizza-boxes",
+   216→      short: "Your artwork, printed on our pizza box range.",
+   217→      desc: "Custom printed pizza boxes with your branding in 1–4 colours. Plate setup applies; pricing depends on artwork, colours and volume. Request a quotation to begin.",
+   218→      material: "Single-wall corrugated kraft",
+   219→      dims: "10 / 12 / 14 in formats",
+   220→      colour: "Natural kraft or white top liner",
+   221→      printing: "1–4 colour flexo",
+   222→      casePack: 100,
+   223→      moq: 2500,
+   224→      increment: 500,
+   225→      unit: "each",
+   226→      price: null,
+   227→      stock: "ENQUIRY_ONLY",
+   228→      lead: "Quotation required — setup and artwork approval included",
+   229→    },
+   230→    {
+   231→      sku: "JG-FP-KB6",
+   232→      name: "Kraft Takeout Bag 6.25 × 9.25 in",
+   233→      cat: "food-packaging",
+   234→      short: "Flat-handle kraft paper bag for takeaway.",
+   235→      desc: "Sturdy kraft takeout bag with flat paper handles. Standard takeaway size, sold in bundles of 500. Pairs with our pizza and wrap ranges.",
+   236→      material: "Natural kraft paper, 70 lb basis",
+   237→      dims: "6.25 × 9.25 × 3.75 in",
+   238→      colour: "Natural kraft",
+   239→      printing: "1–2 colour flexo available on request",
+   240→      casePack: 500,
+   241→      palletPack: 10_000,
+   242→      moq: 1000,
+   243→      increment: 500,
+   244→      unit: "each",
+   245→      price: 18,
+   246→      stock: "IN_STOCK",
+   247→    },
+   248→    {
+   249→      sku: "JG-FP-SC32",
+   250→      name: "32 oz Soup Container & Lid",
+   251→      cat: "food-packaging",
+   252→      short: "PP soup cup with vented lid, case of 100.",
+   253→      desc: "32-ounce polypropylene soup container with matching vented lid. Microwave-safe and leak-resistant for delivery. Containers and lids bundled together.",
+   254→      material: "Food-grade polypropylene",
+   255→      dims: "32 oz capacity, 97 mm rim diameter",
+   256→      colour: "White",
+   257→      printing: "Not applicable (stock item)",
+   258→      casePack: 100,
+   259→      palletPack: 2000,
+   260→      moq: 300,
+   261→      increment: 100,
+   262→      unit: "each",
+   263→      price: 36,
+   264→      stock: "IN_STOCK",
+   265→    },
+   266→    {
+   267→      sku: "JG-FP-GW12",
+   268→      name: "Grease-Resistant Sandwich Wrap 12 × 12 in",
+   269→      cat: "food-packaging",
+   270→      short: "Dry-wax sandwich wrap sheets.",
+   271→      desc: "Grease-resistant dry-wax paper sheets for wrapping sandwiches, burgers and wraps. Supplied as cut sheets in bundles of 5,000.",
+   272→      material: "Dry-waxed grease-resistant paper",
+   273→      dims: "12 × 12 in sheets",
+   274→      colour: "Natural white",
+   275→      printing: "1-colour flexo available on request",
+   276→      casePack: 5000,
+   277→      palletPack: 100_000,
+   278→      moq: 5000,
+   279→      increment: 2500,
+   280→      unit: "each",
+   281→      price: 5,
+   282→      stock: "IN_STOCK",
+   283→    },
+   284→    {
+   285→      sku: "JG-PET-CLAM6",
+   286→      name: "Clear PET Clamshell 6 × 6 × 3 in",
+   287→      cat: "pet-containers",
+   288→      short: "Crystal-clear hinged clamshell for sandwiches.",
+   289→      desc: "High-clarity PET clamshell with hinged lid, ideal for sandwiches, pastries and salads. Recyclable #1 plastic. Cases of 250.",
+   290→      material: "RPET (recycled PET), 0.4 mm",
+   291→      dims: "6 × 6 × 3 in",
+   292→      colour: "Crystal clear",
+   293→      printing: "Not applicable (stock item)",
+   294→      casePack: 250,
+   295→      palletPack: 3500,
+   296→      moq: 500,
+   297→      increment: 250,
+   298→      unit: "each",
+   299→      price: 29,
+   300→      stock: "IN_STOCK",
+   301→    },
+   302→    {
+   303→      sku: "JG-PET-CT20",
+   304→      name: "PET Cold Cup 20 oz",
+   305→      cat: "pet-containers",
+   306→      short: "Clear 20 oz cold cup, case of 1,000.",
+   307→      desc: "20-ounce crystal-clear PET cold cup with rolled rim for dome or flat lids. Sold per cup in full cases of 1,000.",
+   308→      material: "Virgin PET",
+   309→      dims: "20 oz capacity, 98 mm rim",
+   310→      colour: "Crystal clear",
+   311→      printing: "Not applicable (stock item)",
+   312→      casePack: 1000,
+   313→      palletPack: 40_000,
+   314→      moq: 1000,
+   315→      increment: 1000,
+   316→      unit: "each",
+   317→      price: 9,
+   318→      stock: "IN_STOCK",
+   319→    },
+   320→    {
+   321→      sku: "JG-PET-CT12",
+   322→      name: "PET Cold Cup 12 oz",
+   323→      cat: "pet-containers",
+   324→      short: "Clear 12 oz cold cup, case of 2,000.",
+   325→      desc: "12-ounce crystal-clear PET cold cup with rolled rim. Compact format for tastings and juice service. Sold per cup in cases of 2,000.",
+   326→      material: "Virgin PET",
+   327→      dims: "12 oz capacity, 90 mm rim",
+   328→      colour: "Crystal clear",
+   329→      printing: "Not applicable (stock item)",
+   330→      casePack: 2000,
+   331→      palletPack: 60_000,
+   332→      moq: 2000,
+   333→      increment: 1000,
+   334→      unit: "each",
+   335→      price: 6,
+   336→      stock: "IN_STOCK",
+   337→    },
+   338→    {
+   339→      sku: "JG-PP-DC24",
+   340→      name: "PP Deli Container 24 oz",
+   341→      cat: "pp-containers",
+   342→      short: "Tamper-evident ready PP deli cup.",
+   343→      desc: "24-ounce polypropylene deli container. Microwave and freezer safe. Accepts tamper-evident lids (sold with matching lids bundled).",
+   344→      material: "Food-grade polypropylene",
+   345→      dims: "24 oz capacity, 98 mm rim",
+   346→      colour: "Natural translucent",
+   347→      printing: "Not applicable (stock item)",
+   348→      casePack: 250,
+   349→      palletPack: 2500,
+   350→      moq: 500,
+   351→      increment: 250,
+   352→      unit: "each",
+   353→      price: 22,
+   354→      stock: "IN_STOCK",
+   355→    },
+   356→    {
+   357→      sku: "JG-PP-BW32",
+   358→      name: "Microwave-Safe PP Bowl 32 oz",
+   359→      cat: "pp-containers",
+   360→      short: "Deep PP bowl for hot menu items.",
+   361→      desc: "32-ounce polypropylene bowl with high-heat tolerance for soups, ramen and hot bowls. Lids included. Cases of 150.",
+   362→      material: "Food-grade polypropylene",
+   363→      dims: "32 oz capacity, 185 mm diameter",
+   364→      colour: "Black",
+   365→      printing: "Not applicable (stock item)",
+   366→      casePack: 150,
+   367→      palletPack: 1800,
+   368→      moq: 300,
+   369→      increment: 150,
+   370→      unit: "each",
+   371→      price: 31,
+   372→      stock: "IN_STOCK",
+   373→    },
+   374→    {
+   375→      sku: "JG-CP-CUST",
+   376→      name: "Custom Printed Packaging Program",
+   377→      cat: "custom-printed",
+   378→      short: "Bespoke printed packaging, quoted per project.",
+   379→      desc: "Fully bespoke printed packaging — boxes, wraps, sleeves and labels produced to your specifications and artwork. Each project is individually quoted including plates, setup and freight. Submit a quotation request with your artwork and specifications.",
+   380→      material: "Configurable (corrugated, paperboard, film)",
+   381→      dims: "Per specification",
+   382→      colour: "Per specification",
+   383→      printing: "Flexo, offset litho or digital",
+   384→      casePack: 1,
+   385→      moq: 5000,
+   386→      increment: 500,
+   387→      unit: "each",
+   388→      price: null,
+   389→      stock: "ENQUIRY_ONLY",
+   390→      lead: "Typical turnaround 3–5 weeks from artwork approval",
+   391→    },
+   392→  ];
+   393→
+   394→  const productIds: Record<string, string> = {};
+   395→  for (const p of products) {
+   396→    const rec = await db.product.create({
+   397→      data: {
+   398→        sku: p.sku,
+   399→        name: p.name,
+   400→        categoryId: catId[p.cat],
+   401→        shortDescription: p.short,
+   402→        description: p.desc,
+   403→        material: p.material,
+   404→        dimensions: p.dims,
+   405→        colour: p.colour,
+   406→        printingOptions: p.printing,
+   407→        casePack: p.casePack,
+   408→        palletPack: p.palletPack ?? null,
+   409→        minOrderQty: p.moq,
+   410→        increment: p.increment,
+   411→        unit: p.unit,
+   412→        defaultPriceCents: p.price,
+   413→        stockStatus: p.stock,
+   414→        leadTimeNote: p.lead ?? null,
+   415→      },
+   416→    });
+   417→    productIds[p.sku] = rec.id;
+   418→  }
+   419→
+   420→  // ─── Organizations ─────────────────────────────────────────────────────────
+   421→  const orgs = await Promise.all([
+   422→    db.organization.create({
+   423→      data: {
+   424→        code: "JG-C1001",
+   425→        name: "Maple Leaf Pizzeria Ltd.",
+   426→        status: "ACTIVE",
+   427→        billingLine1: "2145 Bloor Street West",
+   428→        billingCity: "Toronto",
+   429→        billingProvince: "ON",
+   430→        billingPostal: "M6R 2M3",
+   431→        phone: "(416) 555-0182",
+   432→        internalNotes:
+   433→          "Negotiated 2024 rates reconfirmed for Q3. Prefers Thursday deliveries. Watch pizza box volumes — considering printed boxes for spring rebrand.",
+   434→      },
+   435→    }),
+   436→    db.organization.create({
+   437→      data: {
+   438→        code: "JG-C1002",
+   439→        name: "Harvest Food Group Inc.",
+   440→        status: "ACTIVE",
+   441→        billingLine1: "88 Ironside Drive, Unit 12",
+   442→        billingCity: "Mississauga",
+   443→        billingProvince: "ON",
+   444→        billingPostal: "L5G 3L9",
+   445→        phone: "(905) 555-0234",
+   446→        internalNotes:
+   447→          "Distributor account — volume pricing on PET. AP contact is Daniel; purchasing is Ava (invite pending).",
+   448→      },
+   449→    }),
+   450→    db.organization.create({
+   451→      data: {
+   452→        code: "JG-C1003",
+   453→        name: "Pacific Bakehouse Co.",
+   454→        status: "ACTIVE",
+   455→        billingLine1: "1120 Powell Street",
+   456→        billingCity: "Vancouver",
+   457→        billingProvince: "BC",
+   458→        billingPostal: "V6A 1H4",
+   459→        phone: "(604) 555-0197",
+   460→        internalNotes: "Coastal freight applies. Sofia owns purchasing; payables handled by their bookkeeper.",
+   461→      },
+   462→    }),
+   463→  ]);
+   464→  const [maple, harvest, pacific] = orgs;
+   465→
+   466→  // ─── Addresses ──────────────────────────────────────────────────────────────
+   467→  await db.address.createMany({
+   468→    data: [
+   469→      {
+   470→        orgId: maple.id,
+   471→        label: "Main Location — Bloor St",
+   472→        line1: "2145 Bloor Street West",
+   473→        city: "Toronto",
+   474→        province: "ON",
+   475→        postal: "M6R 2M3",
+   476→        isDefault: true,
+   477→      },
+   478→      {
+   479→        orgId: maple.id,
+   480→        label: "Second Store — Danforth",
+   481→        line1: "1082 Danforth Avenue",
+   482→        city: "Toronto",
+   483→        province: "ON",
+   484→        postal: "M4C 1V2",
+   485→        isDefault: false,
+   486→      },
+   487→      {
+   488→        orgId: harvest.id,
+   489→        label: "Distribution Centre",
+   490→        line1: "88 Ironside Drive, Unit 12",
+   491→        city: "Mississauga",
+   492→        province: "ON",
+   493→        postal: "L5G 3L9",
+   494→        isDefault: true,
+   495→      },
+   496→      {
+   497→        orgId: pacific.id,
+   498→        label: "Production Facility",
+   499→        line1: "1120 Powell Street",
+   500→        city: "Vancouver",
+   501→        province: "BC",
+   502→        postal: "V6A 1H4",
+   503→        isDefault: true,
+   504→      },
+   505→    ],
+   506→  });
+   507→
+   508→  // ─── Users ─────────────────────────────────────────────────────────────────
+   509→  const [adminMain, adminSam] = await Promise.all([
+   510→    db.user.create({
+   511→      data: {
+   512→        email: "admin@jefferygroup.com",
+   513→        name: "Morgan Chen",
+   514→        passwordHash: hashPassword("Jeffery2024!"),
+   515→        role: "ADMIN",
+   516→        title: "Operations Director",
+   517→        phone: "(905) 555-0100",
+   518→        status: "ACTIVE",
+   519→        notifyPrefs: JSON.stringify({ orderUpdates: true, quoteUpdates: true, documents: true, messages: true }),
+   520→        lastLoginAt: daysAgo(0, -3),
+   521→      },
+   522→    }),
+   523→    db.user.create({
+   524→      data: {
+   525→        email: "sam.torres@jefferygroup.com",
+   526→        name: "Sam Torres",
+   527→        passwordHash: hashPassword("Jeffery2024!"),
+   528→        role: "ADMIN",
+   529→        title: "Account Manager",
+   530→        phone: "(905) 555-0101",
+   531→        status: "ACTIVE",
+   532→        lastLoginAt: daysAgo(1),
+   533→      },
+   534→    }),
+   535→  ]);
+   536→
+   537→  const [maria, luca, daniel, sofia] = await Promise.all([
+   538→    db.user.create({
+   539→      data: {
+   540→        email: "maria@mapleleafpizzeria.ca",
+   541→        name: "Maria Rossi",
+   542→        passwordHash: hashPassword("Client2024!"),
+   543→        role: "CUSTOMER",
+   544→        orgId: maple.id,
+   545→        title: "Purchasing Manager",
+   546→        phone: "(416) 555-0183",
+   547→        status: "ACTIVE",
+   548→        notifyPrefs: JSON.stringify({ orderUpdates: true, quoteUpdates: true, documents: true, messages: true }),
+   549→        lastLoginAt: daysAgo(0, -1),
+   550→      },
+   551→    }),
+   552→    db.user.create({
+   553→      data: {
+   554→        email: "luca@mapleleafpizzeria.ca",
+   555→        name: "Luca Rossi",
+   556→        passwordHash: hashPassword("Client2024!"),
+   557→        role: "CUSTOMER",
+   558→        orgId: maple.id,
+   559→        title: "Accounts Payable",
+   560→        status: "ACTIVE",
+   561→        lastLoginAt: daysAgo(6),
+   562→      },
+   563→    }),
+   564→    db.user.create({
+   565→      data: {
+   566→        email: "daniel@harvestfood.ca",
+   567→        name: "Daniel Okafor",
+   568→        passwordHash: hashPassword("Client2024!"),
+   569→        role: "CUSTOMER",
+   570→        orgId: harvest.id,
+   571→        title: "Supply Chain Lead",
+   572→        phone: "(905) 555-0235",
+   573→        status: "ACTIVE",
+   574→        lastLoginAt: daysAgo(2),
+   575→      },
+   576→    }),
+   577→    db.user.create({
+   578→      data: {
+   579→        email: "sofia@pacificbakehouse.ca",
+   580→        name: "Sofia Lindqvist",
+   581→        passwordHash: hashPassword("Client2024!"),
+   582→        role: "CUSTOMER",
+   583→        orgId: pacific.id,
+   584→        title: "Owner & Head Baker",
+   585→        phone: "(604) 555-0198",
+   586→        status: "ACTIVE",
+   587→        lastLoginAt: daysAgo(0, -5),
+   588→      },
+   589→    }),
+   590→  ]);
+   591→
+   592→  // ─── Product access (approved per customer) ────────────────────────────────
+   593→  const accessMatrix: Record<string, string[]> = {
+   594→    [maple.id]: ["JG-PZ-10", "JG-PZ-12", "JG-PZ-14", "JG-PZ-CP", "JG-FP-KB6", "JG-FP-SC32", "JG-FP-GW12"],
+   595→    [harvest.id]: [
+   596→      "JG-PET-CLAM6",
+   597→      "JG-PET-CT20",
+   598→      "JG-PET-CT12",
+   599→      "JG-PP-DC24",
+   600→      "JG-PP-BW32",
+   601→      "JG-FP-SC32",
+   602→      "JG-FP-KB6",
+   603→      "JG-FP-GW12",
+   604→    ],
+   605→    [pacific.id]: ["JG-CB-1208", "JG-CB-1612", "JG-CB-MAI4", "JG-CB-PALS", "JG-FP-KB6", "JG-CP-CUST"],
+   606→  };
+   607→  for (const [orgId, skus] of Object.entries(accessMatrix)) {
+   608→    await db.productAccess.createMany({
+   609→      data: skus.map((sku) => ({ orgId, productId: productIds[sku], approved: true })),
+   610→    });
+   611→  }
+   612→
+   613→  // ─── Customer-specific negotiated pricing ─────────────────────────────────
+   614→  const prices: [string, string, number, string][] = [
+   615→    [maple.id, "JG-PZ-10", 36, "2024 volume rate — 3,000+ boxes per order"],
+   616→    [maple.id, "JG-PZ-12", 44, "2024 volume rate — 3,000+ boxes per order"],
+   617→    [maple.id, "JG-FP-KB6", 16, "Standing rate, reconfirmed Q3 2024"],
+   618→    [harvest.id, "JG-PET-CLAM6", 26, "Distributor volume tier"],
+   619→    [harvest.id, "JG-PET-CT20", 8, "Distributor volume tier (case pricing)"],
+   620→    [harvest.id, "JG-PP-DC24", 19, "Distributor volume tier"],
+   621→    [harvest.id, "JG-FP-SC32", 33, "Standing rate"],
+   622→    [pacific.id, "JG-CB-1208", 82, "Coastal program rate"],
+   623→    [pacific.id, "JG-CB-MAI4", 48, "Coastal program rate"],
+   624→    [pacific.id, "JG-FP-KB6", 16, "Standing rate"],
+   625→  ];
+   626→  await db.customerPrice.createMany({
+   627→    data: prices.map(([orgId, sku, cents, note]) => ({
+   628→      orgId,
+   629→      productId: productIds[sku],
+   630→      priceCents: cents,
+   631→      note,
+   632→      effectiveFrom: daysAgo(120),
+   633→    })),
+   634→  });
+   635→
+   636→  const effectivePrice = (orgId: string, sku: string): number | null => {
+   637→    const custom = prices.find((p) => p[0] === orgId && p[1] === sku);
+   638→    if (custom) return custom[2];
+   639→    const prod = products.find((p) => p.sku === sku)!;
+   640→    return prod.price;
+   641→  };
+   642→
+   643→  // ─── Orders (with status history) ───────────────────────────────────────────
+   644→  let orderSeq = 100;
+   645→  const orderNumber = () => {
+   646→    orderSeq += 1;
+   647→    return `ORD-2024-${String(orderSeq).padStart(4, "0")}`;
+   648→  };
+   649→
+   650→  async function seedOrder(opts: {
+   651→    orgId: string;
+   652→    org: (typeof orgs)[number];
+   653→    userId: string;
+   654→    userName: string;
+   655→    submittedDaysAgo: number;
+   656→    lines: { sku: string; qty: number; note?: string }[];
+   657→    shipping: string;
+   658→    poNumber?: string;
+   659→    notes?: string;
+   660→    requestedDelivery?: string;
+   661→    history: { status: string; note?: string; daysAgo: number; by: "admin" | "customer" }[];
+   662→    estimatedDeliveryDaysFromNow?: number;
+   663→    trackingNumber?: string;
+   664→    reorderSource?: string;
+   665→  }) {
+   666→    const items = opts.lines.map((l) => {
+   667→      const price = effectivePrice(opts.orgId, l.sku)!;
+   668→      const prod = products.find((p) => p.sku === l.sku)!;
+   669→      return {
+   670→        productId: productIds[l.sku],
+   671→        sku: l.sku,
+   672→        name: prod.name,
+   673→        qty: l.qty,
+   674→        unitPriceCents: price,
+   675→        lineTotalCents: price * l.qty,
+   676→        note: l.note ?? null,
+   677→      };
+   678→    });
+   679→    const t = totals(items);
+   680→    const order = await db.order.create({
+   681→      data: {
+   682→        orderNumber: orderNumber(),
+   683→        orgId: opts.orgId,
+   684→        userId: opts.userId,
+   685→        status: opts.history[opts.history.length - 1].status,
+   686→        subtotalCents: t.subtotal,
+   687→        taxCents: t.tax,
+   688→        totalCents: t.total,
+   689→        taxRateBp: TAX_BP,
+   690→        shippingText: opts.shipping,
+   691→        poNumber: opts.poNumber ?? null,
+   692→        notes: opts.notes ?? null,
+   693→        requestedDelivery: opts.requestedDelivery ?? null,
+   694→        estimatedDelivery:
+   695→          opts.estimatedDeliveryDaysFromNow !== undefined
+   696→            ? daysFromNow(opts.estimatedDeliveryDaysFromNow)
+   697→            : null,
+   698→        trackingNumber: opts.trackingNumber ?? null,
+   699→        reorderSource: opts.reorderSource ?? null,
+   700→        createdAt: daysAgo(opts.submittedDaysAgo),
+   701→        updatedAt: daysAgo(Math.max(0, opts.history[opts.history.length - 1].daysAgo)),
+   702→        items: { create: items },
+   703→      },
+   704→    });
+   705→    await db.orderStatusHistory.createMany({
+   706→      data: opts.history.map((h) => ({
+   707→        orderId: order.id,
+   708→        status: h.status,
+   709→        note: h.note ?? null,
+   710→        byUserId: h.by === "admin" ? adminMain.id : opts.userId,
+   711→        byName: h.by === "admin" ? "Morgan Chen (Jeffery Group)" : opts.userName,
+   712→        createdAt: daysAgo(h.daysAgo),
+   713→      })),
+   714→    });
+   715→    return order;
+   716→  }
+   717→
+   718→  const shipMaple = "Main Location — 2145 Bloor Street West, Toronto, ON, M6R 2M3";
+   719→  const shipMaple2 = "Second Store — 1082 Danforth Avenue, Toronto, ON, M4C 1V2";
+   720→  const shipHarvest = "Distribution Centre — 88 Ironside Drive, Unit 12, Mississauga, ON, L5G 3L9";
+   721→  const shipPacific = "Production Facility — 1120 Powell Street, Vancouver, BC, V6A 1H4";
+   722→
+   723→  // Maple Leaf — delivered order (reorder source)
+   724→  const mapleDelivered = await seedOrder({
+   725→    orgId: maple.id,
+   726→    org: maple,
+   727→    userId: maria.id,
+   728→    userName: "Maria Rossi",
+   729→    submittedDaysAgo: 58,
+   730→    lines: [
+   731→      { sku: "JG-PZ-12", qty: 5000 },
+   732→      { sku: "JG-FP-KB6", qty: 1000 },
+   733→    ],
+   734→    shipping: shipMaple,
+   735→    poNumber: "MLP-PO-0871",
+   736→    notes: "Standard Thursday delivery if possible.",
+   737→    requestedDelivery: "Within 2 weeks of confirmation",
+   738→    history: [
+   739→      { status: "SUBMITTED", daysAgo: 58, by: "customer" },
+   740→      { status: "UNDER_REVIEW", note: "Received — reviewing availability.", daysAgo: 58, by: "admin" },
+   741→      { status: "CONFIRMED", note: "Stock confirmed. Pricing as agreed.", daysAgo: 57, by: "admin" },
+   742→      { status: "PROCESSING", daysAgo: 52, by: "admin" },
+   743→      { status: "READY_FOR_SHIPMENT", daysAgo: 48, by: "admin" },
+   744→      { status: "DISPATCHED", note: "Dispatched on JG truck 22.", daysAgo: 46, by: "admin" },
+   745→      { status: "DELIVERED", note: "Signed for by M. Rossi.", daysAgo: 44, by: "admin" },
+   746→    ],
+   747→    estimatedDeliveryDaysFromNow: -44,
+   748→    trackingNumber: "JG-TRK-78412",
+   749→  });
+   750→
+   751→  // Maple Leaf — dispatched, ETA tomorrow
+   752→  await seedOrder({
+   753→    orgId: maple.id,
+   754→    org: maple,
+   755→    userId: maria.id,
+   756→    userName: "Maria Rossi",
+   757→    submittedDaysAgo: 20,
+   758→    lines: [
+   759→      { sku: "JG-PZ-12", qty: 3000 },
+   760→      { sku: "JG-PZ-10", qty: 1000 },
+   761→      { sku: "JG-FP-SC32", qty: 300 },
+   762→    ],
+   763→    shipping: shipMaple,
+   764→    poNumber: "MLP-PO-0903",
+   765→    requestedDelivery: "Week of confirmation + 1",
+   766→    history: [
+   767→      { status: "SUBMITTED", daysAgo: 20, by: "customer" },
+   768→      { status: "UNDER_REVIEW", daysAgo: 20, by: "admin" },
+   769→      { status: "CONFIRMED", note: "Confirmed — production slot booked.", daysAgo: 19, by: "admin" },
+   770→      { status: "PROCESSING", daysAgo: 15, by: "admin" },
+   771→      { status: "IN_PRODUCTION", note: "Printing run scheduled.", daysAgo: 12, by: "admin" },
+   772→      { status: "READY_FOR_SHIPMENT", daysAgo: 5, by: "admin" },
+   773→      { status: "DISPATCHED", note: "Carrier: Jeffery Group route 4.", daysAgo: 1, by: "admin" },
+   774→    ],
+   775→    estimatedDeliveryDaysFromNow: 1,
+   776→    trackingNumber: "JG-TRK-79120",
+   777→  });
+   778→
+   779→  // Maple Leaf — in production
+   780→  await seedOrder({
+   781→    orgId: maple.id,
+   782→    org: maple,
+   783→    userId: maria.id,
+   784→    userName: "Maria Rossi",
+   785→    submittedDaysAgo: 6,
+   786→    lines: [
+   787→      { sku: "JG-PZ-10", qty: 3000 },
+   788→      { sku: "JG-PZ-14", qty: 500 },
+   789→    ],
+   790→    shipping: shipMaple2,
+   791→    poNumber: "MLP-PO-0918",
+   792→    requestedDelivery: "Before month end",
+   793→    history: [
+   794→      { status: "SUBMITTED", daysAgo: 6, by: "customer" },
+   795→      { status: "UNDER_REVIEW", daysAgo: 6, by: "admin" },
+   796→      { status: "CONFIRMED", note: "14\" boxes from new stock run.", daysAgo: 5, by: "admin" },
+   797→      { status: "PROCESSING", daysAgo: 4, by: "admin" },
+   798→      { status: "IN_PRODUCTION", note: "Estimated completion this week.", daysAgo: 2, by: "admin" },
+   799→    ],
+   800→    estimatedDeliveryDaysFromNow: 7,
+   801→  });
+   802→
+   803→  // Harvest — delivered
+   804→  await seedOrder({
+   805→    orgId: harvest.id,
+   806→    org: harvest,
+   807→    userId: daniel.id,
+   808→    userName: "Daniel Okafor",
+   809→    submittedDaysAgo: 50,
+   810→    lines: [
+   811→      { sku: "JG-PET-CLAM6", qty: 4000 },
+   812→      { sku: "JG-PET-CT20", qty: 5000 },
+   813→      { sku: "JG-PP-DC24", qty: 2000 },
+   814→    ],
+   815→    shipping: shipHarvest,
+   816→    poNumber: "HFG-PO-3341",
+   817→    history: [
+   818→      { status: "SUBMITTED", daysAgo: 50, by: "customer" },
+   819→      { status: "UNDER_REVIEW", daysAgo: 50, by: "admin" },
+   820→      { status: "CONFIRMED", daysAgo: 49, by: "admin" },
+   821→      { status: "PROCESSING", daysAgo: 45, by: "admin" },
+   822→      { status: "READY_FOR_SHIPMENT", daysAgo: 41, by: "admin" },
+   823→      { status: "DISPATCHED", daysAgo: 39, by: "admin" },
+   824→      { status: "DELIVERED", daysAgo: 37, by: "admin" },
+   825→    ],
+   826→    estimatedDeliveryDaysFromNow: -37,
+   827→    trackingNumber: "JG-TRK-77201",
+   828→  });
+   829→
+   830→  // Harvest — confirmed, ETA in 9 days
+   831→  const harvestConfirmed = await seedOrder({
+   832→    orgId: harvest.id,
+   833→    org: harvest,
+   834→    userId: daniel.id,
+   835→    userName: "Daniel Okafor",
+   836→    submittedDaysAgo: 26,
+   837→    lines: [
+   838→      { sku: "JG-PP-BW32", qty: 900 },
+   839→      { sku: "JG-FP-SC32", qty: 500 },
+   840→    ],
+   841→    shipping: shipHarvest,
+   842→    poNumber: "HFG-PO-3355",
+   843→    notes: "Split pallet if possible — freezer space limited at DC.",
+   844→    requestedDelivery: "Two-week window",
+   845→    history: [
+   846→      { status: "SUBMITTED", daysAgo: 26, by: "customer" },
+   847→      { status: "UNDER_REVIEW", daysAgo: 26, by: "admin" },
+   848→      { status: "CONFIRMED", note: "Black PP bowls from next production run.", daysAgo: 25, by: "admin" },
+   849→      { status: "PROCESSING", daysAgo: 20, by: "admin" },
+   850→    ],
+   851→    estimatedDeliveryDaysFromNow: 9,
+   852→  });
+   853→
+   854→  // Harvest — fresh request awaiting review
+   855→  await seedOrder({
+   856→    orgId: harvest.id,
+   857→    org: harvest,
+   858→    userId: daniel.id,
+   859→    userName: "Daniel Okafor",
+   860→    submittedDaysAgo: 3,
+   861→    lines: [
+   862→      { sku: "JG-PET-CT20", qty: 10_000 },
+   863→      { sku: "JG-PET-CT12", qty: 8000 },
+   864→      { sku: "JG-FP-GW12", qty: 5000 },
+   865→    ],
+   866→    shipping: shipHarvest,
+   867→    poNumber: "HFG-PO-3362",
+   868→    notes: "Q4 promotional volume — please confirm case quantities before processing.",
+   869→    requestedDelivery: "First week of next month",
+   870→    history: [
+   871→      { status: "SUBMITTED", daysAgo: 3, by: "customer" },
+   872→      { status: "UNDER_REVIEW", note: "Received — availability check underway.", daysAgo: 2, by: "admin" },
+   873→    ],
+   874→  });
+   875→
+   876→  // Pacific — delivered
+   877→  await seedOrder({
+   878→    orgId: pacific.id,
+   879→    org: pacific,
+   880→    userId: sofia.id,
+   881→    userName: "Sofia Lindqvist",
+   882→    submittedDaysAgo: 44,
+   883→    lines: [
+   884→      { sku: "JG-CB-MAI4", qty: 5000 },
+   885→      { sku: "JG-FP-KB6", qty: 2000 },
+   886→    ],
+   887→    shipping: shipPacific,
+   888→    poNumber: "PBC-PO-1192",
+   889→    history: [
+   890→      { status: "SUBMITTED", daysAgo: 44, by: "customer" },
+   891→      { status: "UNDER_REVIEW", daysAgo: 44, by: "admin" },
+   892→      { status: "CONFIRMED", daysAgo: 43, by: "admin" },
+   893→      { status: "PROCESSING", daysAgo: 39, by: "admin" },
+   894→      { status: "READY_FOR_SHIPMENT", daysAgo: 35, by: "admin" },
+   895→      { status: "DISPATCHED", daysAgo: 33, by: "admin" },
+   896→      { status: "DELIVERED", daysAgo: 31, by: "admin" },
+   897→    ],
+   898→    estimatedDeliveryDaysFromNow: -31,
+   899→    trackingNumber: "JG-TRK-76884",
+   900→  });
+   901→
+   902→  // Pacific — ready for shipment
+   903→  await seedOrder({
+   904→    orgId: pacific.id,
+   905→    org: pacific,
+   906→    userId: sofia.id,
+   907→    userName: "Sofia Lindqvist",
+   908→    submittedDaysAgo: 14,
+   909→    lines: [
+   910→      { sku: "JG-CB-1208", qty: 3000 },
+   911→      { sku: "JG-CB-1612", qty: 500 },
+   912→    ],
+   913→    shipping: shipPacific,
+   914→    poNumber: "PBC-PO-1203",
+   915→    requestedDelivery: "Coastal freight — mid-window",
+   916→    history: [
+   917→      { status: "SUBMITTED", daysAgo: 14, by: "customer" },
+   918→      { status: "UNDER_REVIEW", daysAgo: 14, by: "admin" },
+   919→      { status: "CONFIRMED", daysAgo: 13, by: "admin" },
+   920→      { status: "PROCESSING", daysAgo: 10, by: "admin" },
+   921→      { status: "IN_PRODUCTION", daysAgo: 8, by: "admin" },
+   922→      { status: "READY_FOR_SHIPMENT", note: "Awaiting carrier booking.", daysAgo: 1, by: "admin" },
+   923→    ],
+   924→    estimatedDeliveryDaysFromNow: 5,
+   925→  });
+   926→
+   927→  // Pacific — submitted yesterday (fresh request)
+   928→  const pacificFresh = await seedOrder({
+   929→    orgId: pacific.id,
+   930→    org: pacific,
+   931→    userId: sofia.id,
+   932→    userName: "Sofia Lindqvist",
+   933→    submittedDaysAgo: 1,
+   934→    lines: [{ sku: "JG-CB-MAI4", qty: 3000 }],
+   935→    shipping: shipPacific,
+   936→    poNumber: "PBC-PO-1211",
+   937→    notes: "For the holiday gift-box program — please confirm before print run.",
+   938→    requestedDelivery: "Four weeks out",
+   939→    history: [{ status: "SUBMITTED", daysAgo: 1, by: "customer" }],
+   940→    reorderSource: "ORD-2024-0108",
+   941→  });
+   942→
+   943→  // ─── Quotations ────────────────────────────────────────────────────────────
+   944→  let quoteSeq = 30;
+   945→  const quoteNumber = () => {
+   946→    quoteSeq += 1;
+   947→    return `Q-2024-${String(quoteSeq).padStart(3, "0")}`;
+   948→  };
+   949→
+   950→  // Q-2024-031 — ISSUED to Maple Leaf (custom printed pizza boxes)
+   951→  await db.quotation.create({
+   952→    data: {
+   953→      quoteNumber: quoteNumber(),
+   954→      orgId: maple.id,
+   955→      userId: maria.id,
+   956→      status: "ISSUED",
+   957→      revision: 0,
+   958→      title: '5,000 × custom printed 12" pizza boxes',
+   959→      category: "Pizza Boxes",
+   960→      productName: '12" Corrugated Pizza Box — custom print',
+   961→      dimensions: '12 × 12 × 1.75 in',
+   962→      material: "Single-wall corrugated kraft",
+   963→      colour: "White top liner",
+   964→      printing: "2-colour flexo, customer artwork",
+   965→      quantity: "5,000 boxes",
+   966→      neededBy: "6 weeks",
+   967→      destination: "Main Location — 2145 Bloor Street West, Toronto",
+   968→      specs: "Artwork supplied as vector PDF; plates produced by Jeffery Group.",
+   969→      comments: "Rebrand launch — spring menu. Second colour is a warm red.",
+   970→      itemsTotalCents: 328_500,
+   971→      expiryDate: daysFromNow(10),
+   972→      terms:
+   973→        "Quote valid until the expiry date shown. Pricing includes plate setup for the two-colour run. Freight quoted to the Bloor Street location. Taxes extra. Lead time 4 weeks from artwork approval and order confirmation.",
+   974→      createdAt: daysAgo(9),
+   975→      issuedAt: daysAgo(4),
+   976→      items: {
+   977→        create: [
+   978→          {
+   979→            description: 'Custom printed 12" pizza box — 2-colour flexo, white top liner',
+   980→            kind: "PRODUCT",
+   981→            qty: 5000,
+   982→            unitPriceCents: 62,
+   983→            lineTotalCents: 310_000,
+   984→          },
+   985→          { description: "Flexo plate setup — two plates", kind: "SETUP", qty: 1, unitPriceCents: 18_000, lineTotalCents: 18_000 },
+   986→          { description: "Delivery freight — Toronto (Bloor St)", kind: "FREIGHT", qty: 1, unitPriceCents: 500, lineTotalCents: 500 },
+   987→        ],
+   988→      },
+   989→    },
+   990→  });
+   991→
+   992→  // Q-2024-029 — REQUESTED by Pacific (admin must review & issue)
+   993→  await db.quotation.create({
+   994→    data: {
+   995→      quoteNumber: quoteNumber(),
+   996→      orgId: pacific.id,
+   997→      userId: sofia.id,
+   998→      status: "REQUESTED",
+   999→      revision: 0,
+  1000→      title: "Custom printed mailer boxes 10 × 7 × 4 in — 8,000 units",
+  1001→      category: "Custom Printed Packaging",
+  1002→      productName: "White Mailer Carton 10 × 7 × 4 in — custom print",
+  1003→      dimensions: "10 × 7 × 4 in",
+  1004→      material: "Single-wall corrugated, white outside / kraft inside",
+  1005→      colour: "White",
+  1006→      printing: "1-colour flexo (black), supplied artwork",
+  1007→      quantity: "8,000 boxes",
+  1008→      neededBy: "8 weeks",
+  1009→      destination: "Production Facility — 1120 Powell Street, Vancouver",
+  1010→      specs: "Logo centered on lid panel; artwork supplied as vector EPS.",
+  1011→      comments: "Annual holiday gift-box program. Would like to evaluate two quantity tiers if possible (8,000 / 12,000).",
+  1012→      createdAt: daysAgo(2),
+  1013→    },
+  1014→  });
+  1015→
+  1016→  // Q-2024-033 — REQUESTED by Harvest
+  1017→  await db.quotation.create({
+  1018→    data: {
+  1019→      quoteNumber: quoteNumber(),
+  1020→      orgId: harvest.id,
+  1021→      userId: daniel.id,
+  1022→      status: "REQUESTED",
+  1023→      revision: 0,
+  1024→      title: "Tamper-evident PP containers 8 oz — 20,000 units",
+  1025→      category: "PP Containers",
+  1026→      productName: "PP Deli Container 8 oz (tamper-evident)",
+  1027→      dimensions: "8 oz capacity",
+  1028→      material: "Food-grade polypropylene",
+  1029→      colour: "Natural translucent",
+  1030→      printing: "None",
+  1031→      quantity: "20,000 containers",
+  1032→      neededBy: "10 weeks",
+  1033→      destination: "Distribution Centre — Mississauga",
+  1034→      specs: "Tamper-evident lid style required; freezer-safe to −20 °C.",
+  1035→      comments: "Evaluating for the new meal-kit line. Freight to DC required.",
+  1036→      createdAt: daysAgo(1),
+  1037→    },
+  1038→  });
+  1039→
+  1040→  // Q-2024-025 — ACCEPTED by Harvest
+  1041→  const acceptedQuote = await db.quotation.create({
+  1042→    data: {
+  1043→      quoteNumber: quoteNumber(),
+  1044→      orgId: harvest.id,
+  1045→      userId: daniel.id,
+  1046→      status: "ACCEPTED",
+  1047→      revision: 0,
+  1048→      title: "20 oz PET cold cups — 50,000 units (volume tier)",
+  1049→      category: "PET Containers",
+  1050→      productName: "PET Cold Cup 20 oz",
+  1051→      quantity: "50,000 cups",
+  1052→      neededBy: "4 weeks",
+  1053→      destination: "Distribution Centre — Mississauga",
+  1054→      itemsTotalCents: 176_000,
+  1055→      expiryDate: daysAgo(5),
+  1056→      createdAt: daysAgo(21),
+  1057→      issuedAt: daysAgo(18),
+  1058→      respondedAt: daysAgo(15),
+  1059→      respondedNote: "Accepted — aligns with our Q4 program volumes.",
+  1060→      terms: "Volume tier pricing held for 60 days from acceptance. Freight included to a single Ontario destination.",
+  1061→      items: {
+  1062→        create: [
+  1063→          {
+  1064→            description: "PET Cold Cup 20 oz — volume tier",
+  1065→            kind: "PRODUCT",
+  1066→            qty: 50_000,
+  1067→            unitPriceCents: 8,
+  1068→            lineTotalCents: 176_000,
+  1069→          },
+  1070→          { description: "Freight — full truckload to Mississauga DC", kind: "FREIGHT", qty: 1, unitPriceCents: 0, lineTotalCents: 0 },
+  1071→        ],
+  1072→      },
+  1073→    },
+  1074→  });
+  1075→
+  1076→  // Q-2024-018 — EXPIRED (Pacific)
+  1077→  await db.quotation.create({
+  1078→    data: {
+  1079→      quoteNumber: quoteNumber(),
+  1080→      orgId: pacific.id,
+  1081→      userId: sofia.id,
+  1082→      status: "EXPIRED",
+  1083→      revision: 0,
+  1084→      title: "Custom printed kraft bags — first tier",
+  1085→      category: "Custom Printed Packaging",
+  1086→      productName: "Kraft Takeout Bag — custom print",
+  1087→      quantity: "12,000 bags",
+  1088→      itemsTotalCents: 96_000,
+  1089→      expiryDate: daysAgo(25),
+  1090→      createdAt: daysAgo(40),
+  1091→      issuedAt: daysAgo(38),
+  1092→      comments: "Exploring printed bags for the holiday season.",
+  1093→      items: {
+  1094→        create: [
+  1095→          { description: "Custom printed kraft takeout bag — 1-colour", kind: "PRODUCT", qty: 12_000, unitPriceCents: 8, lineTotalCents: 96_000 },
+  1096→        ],
+  1097→      },
+  1098→    },
+  1099→  });
+  1100→
+  1101→  // ─── Documents ─────────────────────────────────────────────────────────────
+  1102→  async function doc(data: {
+  1103→    orgId: string;
+  1104→    category: string;
+  1105→    title: string;
+  1106→    description?: string;
+  1107→    fileName: string;
+  1108→    sizeLabel: string;
+  1109→    orderId?: string;
+  1110→    quotationId?: string;
+  1111→    daysAgo?: number;
+  1112→  }) {
+  1113→    await db.document.create({
+  1114→      data: {
+  1115→        orgId: data.orgId,
+  1116→        category: data.category,
+  1117→        title: data.title,
+  1118→        description: data.description ?? null,
+  1119→        fileName: data.fileName,
+  1120→        sizeLabel: data.sizeLabel,
+  1121→        orderId: data.orderId ?? null,
+  1122→        quotationId: data.quotationId ?? null,
+  1123→        uploadedBy: "Morgan Chen (Jeffery Group)",
+  1124→        createdAt: daysAgo(data.daysAgo ?? 2),
+  1125→      },
+  1126→    });
+  1127→  }
+  1128→
+  1129→  await doc({
+  1130→    orgId: maple.id,
+  1131→    category: "INVOICE",
+  1132→    title: "Invoice INV-2024-0312",
+  1133→    description: `Order ${mapleDelivered.orderNumber} — delivered ${daysAgo(44).toLocaleDateString("en-CA")}`,
+  1134→    fileName: "INV-2024-0312.pdf",
+  1135→    sizeLabel: "84 KB",
+  1136→    orderId: mapleDelivered.id,
+  1137→    daysAgo: 42,
+  1138→  });
+  1139→  await doc({
+  1140→    orgId: maple.id,
+  1141→    category: "PURCHASE_ORDER",
+  1142→    title: `Order confirmation ${mapleDelivered.orderNumber}`,
+  1143→    description: "Jeffery Group confirmation of your purchase order MLP-PO-0871",
+  1144→    fileName: `${mapleDelivered.orderNumber}-confirmation.pdf`,
+  1145→    sizeLabel: "62 KB",
+  1146→    orderId: mapleDelivered.id,
+  1147→    daysAgo: 57,
+  1148→  });
+  1149→  await doc({
+  1150→    orgId: maple.id,
+  1151→    category: "STATEMENT",
+  1152→    title: "Statement of account — September",
+  1153→    description: "Demo statement covering September activity",
+  1154→    fileName: "statement-2024-09.pdf",
+  1155→    sizeLabel: "48 KB",
+  1156→    daysAgo: 12,
+  1157→  });
+  1158→  await doc({
+  1159→    orgId: maple.id,
+  1160→    category: "SPECIFICATION",
+  1161→    title: "Product specification — 12\" pizza box",
+  1162→    description: "Board grade, venting and stacking specification",
+  1163→    fileName: "spec-JG-PZ-12.pdf",
+  1164→    sizeLabel: "126 KB",
+  1165→    daysAgo: 70,
+  1166→  });
+  1167→  await doc({
+  1168→    orgId: harvest.id,
+  1169→    category: "INVOICE",
+  1170→    title: "Invoice INV-2024-0298",
+  1171→    description: `Order for PET/PP program — delivered ${daysAgo(37).toLocaleDateString("en-CA")}`,
+  1172→    fileName: "INV-2024-0298.pdf",
+  1173→    sizeLabel: "88 KB",
+  1174→    daysAgo: 35,
+  1175→  });
+  1176→  await doc({
+  1177→    orgId: harvest.id,
+  1178→    category: "QUOTATION",
+  1179→    title: `Quotation ${acceptedQuote.quoteNumber} (accepted)`,
+  1180→    description: "Volume-tier pricing for 20 oz PET cold cups",
+  1181→    fileName: `${acceptedQuote.quoteNumber}.pdf`,
+  1182→    sizeLabel: "76 KB",
+  1183→    quotationId: acceptedQuote.id,
+  1184→    daysAgo: 15,
+  1185→  });
+  1186→  await doc({
+  1187→    orgId: harvest.id,
+  1188→    category: "STATEMENT",
+  1189→    title: "Statement of account — October",
+  1190→    description: "Demo statement covering October activity",
+  1191→    fileName: "statement-2024-10.pdf",
+  1192→    sizeLabel: "52 KB",
+  1193→    daysAgo: 3,
+  1194→  });
+  1195→  await doc({
+  1196→    orgId: pacific.id,
+  1197→    category: "INVOICE",
+  1198→    title: "Invoice INV-2024-0305",
+  1199→    description: "Mailer cartons and kraft bags — delivered",
+  1200→    fileName: "INV-2024-0305.pdf",
+  1201→    sizeLabel: "82 KB",
+  1202→    daysAgo: 29,
+  1203→  });
+  1204→  await doc({
+  1205→    orgId: pacific.id,
+  1206→    category: "DELIVERY_RECEIPT",
+  1207→    title: "Delivery receipt — Powell Street facility",
+  1208→    description: "Signed proof of delivery",
+  1209→    fileName: "receipt-JG-TRK-76884.pdf",
+  1210→    sizeLabel: "38 KB",
+  1211→    daysAgo: 31,
+  1212→  });
+  1213→
+  1214→  // ─── Notifications ────────────────────────────────────────────────────────
+  1215→  // Customer-facing (Maple Leaf)
+  1216→  await db.notification.createMany({
+  1217→    data: [
+  1218→      {
+  1219→        audience: "CUSTOMER",
+  1220→        orgId: maple.id,
+  1221→        title: `Quotation ${"Q-2024-031"} is ready to review`,
+  1222→        body: "Your quotation for 5,000 custom printed 12\" pizza boxes has been issued and is valid for 10 days.",
+  1223→        kind: "QUOTATION",
+  1224→        view: "quotations",
+  1225→        isRead: false,
+  1226→        createdAt: daysAgo(4),
+  1227→      },
+  1228→      {
+  1229→        audience: "CUSTOMER",
+  1230→        orgId: maple.id,
+  1231→        title: "Invoice INV-2024-0312 uploaded",
+  1232→        body: "A new invoice has been added to your document centre.",
+  1233→        kind: "DOCUMENT",
+  1234→        view: "documents",
+  1235→        isRead: false,
+  1236→        createdAt: daysAgo(2),
+  1237→      },
+  1238→      {
+  1239→        audience: "CUSTOMER",
+  1240→        orgId: maple.id,
+  1241→        title: `Order ${"ORD-2024-0118"} dispatched`,
+  1242→        body: "Your order is on Jeffery Group route 4. Estimated delivery tomorrow.",
+  1243→        kind: "ORDER",
+  1244→        view: "orders",
+  1245→        isRead: true,
+  1246→        createdAt: daysAgo(1),
+  1247→      },
+  1248→    ],
+  1249→  });
+  1250→  // Customer-facing (Harvest)
+  1251→  await db.notification.createMany({
+  1252→    data: [
+  1253→      {
+  1254→        audience: "CUSTOMER",
+  1255→        orgId: harvest.id,
+  1256→        title: `Quotation ${"Q-2024-033"} received`,
+  1257→        body: "We have received your request for tamper-evident PP containers and will respond with pricing shortly.",
+  1258→        kind: "QUOTATION",
+  1259→        view: "quotations",
+  1260→        isRead: false,
+  1261→        createdAt: daysAgo(1),
+  1262→      },
+  1263→    ],
+  1264→  });
+  1265→  // Admin-facing
+  1266→  await db.notification.createMany({
+  1267→    data: [
+  1268→      {
+  1269→        audience: "ADMIN",
+  1270→        title: `New order request ${pacificFresh.orderNumber}`,
+  1271→        body: "Pacific Bakehouse Co. submitted a new order request for the holiday gift-box program.",
+  1272→        kind: "ORDER",
+  1273→        view: "admin-orders",
+  1274→        relatedId: pacificFresh.id,
+  1275→        isRead: false,
+  1276→        createdAt: daysAgo(1),
+  1277→      },
+  1278→      {
+  1279→        audience: "ADMIN",
+  1280→        title: "New quotation request Q-2024-029",
+  1281→        body: "Pacific Bakehouse Co. requested pricing for 8,000 custom printed mailer boxes.",
+  1282→        kind: "QUOTATION",
+  1283→        view: "admin-quotes",
+  1284→        isRead: false,
+  1285→        createdAt: daysAgo(2),
+  1286→      },
+  1287→      {
+  1288→        audience: "ADMIN",
+  1289→        title: "Message received — Maple Leaf Pizzeria",
+  1290→        body: "Maria Rossi asked about delivery timing for ORD-2024-0118.",
+  1291→        kind: "MESSAGE",
+  1292→        view: "admin-notifications",
+  1293→        isRead: false,
+  1294→        createdAt: daysAgo(0, -2),
+  1295→      },
+  1296→      {
+  1297→        audience: "ADMIN",
+  1298→        title: "Quotation request Q-2024-033 awaiting review",
+  1299→        body: "Harvest Food Group requested pricing for 20,000 tamper-evident PP containers.",
+  1300→        kind: "QUOTATION",
+  1301→        view: "admin-quotes",
+  1302→        isRead: true,
+  1303→        createdAt: daysAgo(1),
+  1304→      },
+  1305→    ],
+  1306→  });
+  1307→
+  1308→  // ─── Messages ──────────────────────────────────────────────────────────────
+  1309→  await db.message.createMany({
+  1310→    data: [
+  1311→      {
+  1312→        orgId: maple.id,
+  1313→        userId: maria.id,
+  1314→        subject: `Delivery timing for ORD-2024-0118`,
+  1315→        category: "DELIVERY",
+  1316→        orderId: mapleDelivered.id,
+  1317→        body: "Hi — could you confirm the delivery window for our dispatched order? We would like staff on hand to receive the boxes at the Bloor Street location.",
+  1318→        status: "OPEN",
+  1319→        createdAt: daysAgo(0, -2),
+  1320→      },
+  1321→      {
+  1322→        orgId: harvest.id,
+  1323→        userId: daniel.id,
+  1324→        subject: "Spec confirmation for PP deli containers",
+  1325→        category: "PRODUCT",
+  1326→        body: "Can you confirm the freezer rating on the 24 oz PP deli containers? We need assurance for −20 °C storage.",
+  1327→        status: "ANSWERED",
+  1328→        reply:
+  1329→          "Confirmed — the JG-PP-DC24 is rated for freezer storage to −20 °C and microwave reheating. Specification sheet is in your document centre.",
+  1330→        repliedAt: daysAgo(4),
+  1331→        repliedBy: "Sam Torres (Jeffery Group)",
+  1332→        createdAt: daysAgo(5),
+  1333→      },
+  1334→    ],
+  1335→  });
+  1336→
+  1337→  // ─── Audit log ─────────────────────────────────────────────────────────────
+  1338→  await db.auditLog.createMany({
+  1339→    data: [
+  1340→      {
+  1341→        actorId: adminMain.id,
+  1342→        actorName: "Morgan Chen",
+  1343→        action: "PRICE_UPDATED",
+  1344→        entity: "CustomerPrice",
+  1345→        detail: "Maple Leaf Pizzeria — JG-PZ-12 set to $0.44 (volume tier)",
+  1346→        createdAt: daysAgo(120),
+  1347→      },
+  1348→      {
+  1349→        actorId: adminMain.id,
+  1350→        actorName: "Morgan Chen",
+  1351→        action: "CUSTOMER_CREATED",
+  1352→        entity: "Organization",
+  1353→        detail: "Pacific Bakehouse Co. onboarded with coastal program pricing",
+  1354→        createdAt: daysAgo(90),
+  1355→      },
+  1356→      {
+  1357→        actorId: adminSam.id,
+  1358→        actorName: "Sam Torres",
+  1359→        action: "ORDER_STATUS_CHANGED",
+  1360→        entity: "Order",
+  1361→        detail: "ORD-2024-0118 → DISPATCHED",
+  1362→        createdAt: daysAgo(1),
+  1363→      },
+  1364→      {
+  1365→        actorId: adminMain.id,
+  1366→        actorName: "Morgan Chen",
+  1367→        action: "QUOTATION_ISSUED",
+  1368→        entity: "Quotation",
+  1369→        detail: "Q-2024-031 issued to Maple Leaf Pizzeria ($3,285.00)",
+  1370→        createdAt: daysAgo(4),
+  1371→      },
+  1372→    ],
+  1373→  });
+  1374→
+  1375→  console.log("Seed complete.");
+  1376→}
+  1377→
+  1378→main()
+  1379→  .catch((e) => {
+  1380→    console.error(e);
+  1381→    process.exit(1);
+  1382→  })
+  1383→  .finally(() => db.$disconnect());
+  1384→

@@ -1,0 +1,1568 @@
+# PROJECT MASTER PROMPT — CLIENTHUB
+## Jeffery Group Ltd. | Premium B2B Customer Portal & Order Management Platform
+
+You are acting as a senior product designer, principal UX/UI designer, full-stack software architect, and experienced SaaS developer.
+
+Your assignment is to design and build **ClientHub**, a sophisticated, production-quality B2B customer portal for Jeffery Group Ltd., a packaging manufacturing and supply business.
+
+This is not a generic e-commerce website. It is not a simple landing page. It is not an ordinary admin dashboard.
+
+ClientHub is a complete digital customer experience platform that allows packaging customers to interact with Jeffery Group, browse their approved products, view their negotiated pricing, request quotations, submit orders, track deliveries, download documents, and manage their purchasing activities.
+
+The platform must also include a comprehensive internal administration system through which Jeffery Group can manage customers, products, pricing, quotations, orders, documents, and customer communications.
+
+I want you to build a genuinely impressive application.
+
+The finished product should look like it was designed by a highly experienced design team at a leading technology company. Think Apple-level attention to detail combined with the usability and sophistication of the best modern enterprise SaaS platforms.
+
+**Do not compromise on design quality, functionality, usability, or polish.**
+
+---
+
+# 1. PRODUCT VISION
+
+### What is ClientHub?
+
+ClientHub is the online customer portal for Jeffery Group Ltd.
+
+Its purpose is to modernize the way Jeffery Group communicates and conducts business with its existing packaging customers.
+
+Currently, business-to-business packaging orders can involve a considerable amount of manual communication:
+
+- Customers contact Jeffery Group to request product information.
+- Customers ask for pricing.
+- Customers email or message their order quantities.
+- Employees manually confirm product availability.
+- Customers request previous invoices and purchase orders.
+- Customers ask for updates about their shipments.
+- Employees have to look up historical orders.
+- Customers request quotations for customized packaging.
+
+ClientHub should bring these interactions together into a single, centralized platform.
+
+Instead of customers having to contact Jeffery Group for every small request, they should be able to log in and access the information they need themselves.
+
+The platform should make purchasing from Jeffery Group feel professional, easy, transparent, and convenient.
+
+### The main objectives
+
+1. Provide customers with a professional online portal.
+2. Simplify the purchasing and ordering process.
+3. Reduce repetitive administrative work for employees.
+4. Allow customers to quickly reorder previous products.
+5. Centralize quotations, invoices, and business documents.
+6. Improve transparency throughout the order fulfillment process.
+7. Give Jeffery Group complete control over customer accounts and negotiated pricing.
+8. Create a scalable foundation for future business automation.
+
+The application should serve as an extension of Jeffery Group's existing business operations.
+
+---
+
+# 2. BRAND IDENTITY AND DESIGN DIRECTION
+
+This is one of the most important requirements.
+
+I want ClientHub to look exceptional.
+
+Do not create an ordinary Bootstrap dashboard, generic template, or stereotypical AI-generated website.
+
+The design should feel carefully art-directed, premium, refined, and professionally engineered.
+
+### Overall aesthetic
+
+The visual direction should combine:
+
+- Apple's minimalist design philosophy.
+- Modern enterprise SaaS interfaces.
+- Premium fintech dashboard aesthetics.
+- Exceptional typography and spacing.
+- Clean, sophisticated navigation.
+- Subtle interactions and animations.
+- Elegant data presentation.
+- Beautifully designed forms and tables.
+
+The overall feeling should be:
+
+**Modern. Clean. Beautiful. Premium. Sophisticated. Trustworthy. Effortless.**
+
+### Colour palette
+
+Use a restrained and cohesive colour system.
+
+Suggested direction:
+
+- Primary background: White or extremely light neutral grey.
+- Secondary background: Soft off-white.
+- Primary text: Deep charcoal or near-black.
+- Secondary text: Muted grey.
+- Primary accent: Sophisticated navy or deep blue.
+- Secondary accent: Muted blue-grey.
+- Success: Subtle green.
+- Warning: Warm amber.
+- Error: Restrained red.
+- Borders: Very light neutral grey.
+
+Avoid unnecessarily bright colours.
+
+Avoid excessive gradients.
+
+Avoid making every card a different colour.
+
+Avoid strong shadows.
+
+Use colour purposefully to communicate meaning and hierarchy.
+
+### Typography
+
+Typography should look refined and professional.
+
+Use a modern sans-serif font such as:
+
+- Inter
+- Geist
+- SF Pro-inspired typography
+- Other high-quality contemporary sans-serif alternatives.
+
+Establish a consistent typographic hierarchy.
+
+Page titles should be distinctive without being oversized.
+
+Section headings should be understated and elegant.
+
+Supporting text should be readable and appropriately muted.
+
+Numbers and financial figures should be easy to scan.
+
+### Spacing and layout
+
+Whitespace is important.
+
+Do not overcrowd the interface.
+
+Use consistent spacing throughout the application.
+
+Avoid placing too much information into a single viewport.
+
+Use a well-defined grid system.
+
+Cards should have consistent internal padding.
+
+Tables should be spacious enough to read comfortably.
+
+The interface should feel organized rather than compressed.
+
+### Cards and containers
+
+Use subtle borders, soft shadows where appropriate, and carefully considered corner radii.
+
+Cards should have a clean appearance.
+
+Avoid excessive rounded corners that make the platform look childish.
+
+Avoid excessive glassmorphism.
+
+Avoid unnecessary floating elements.
+
+Avoid decorative UI that does not serve a purpose.
+
+### Interaction design
+
+Every interaction should feel intentional.
+
+Implement:
+
+- Smooth hover transitions.
+- Subtle button feedback.
+- Elegant dropdown menus.
+- Clean modal dialogs.
+- Responsive navigation.
+- Loading skeletons.
+- Toast notifications.
+- Smooth page transitions where appropriate.
+- Well-designed confirmation dialogs.
+- Consistent focus states.
+
+Animations should be subtle and fast.
+
+Do not introduce unnecessary animation that slows down the application.
+
+### Design quality reference
+
+Use the following products as design inspiration, not as templates to copy:
+
+- Apple.com
+- Stripe Dashboard
+- Linear
+- Notion
+- Vercel
+- Shopify Admin
+- Ramp
+
+The goal is to create a visual identity that feels original while meeting the quality standards of these products.
+
+---
+
+# 3. PLATFORM STRUCTURE
+
+ClientHub must contain two distinct experiences.
+
+### A. Customer Portal
+
+This is the interface used by Jeffery Group's customers.
+
+Customers should be able to:
+
+- Log in securely.
+- View their personal dashboard.
+- Browse their approved products.
+- See their negotiated prices.
+- Submit orders.
+- Reorder previous purchases.
+- Request quotations.
+- Track orders.
+- View invoices.
+- Download documents.
+- Update account information.
+- Contact Jeffery Group.
+
+### B. Administration Portal
+
+This is the internal system used by Jeffery Group employees.
+
+Administrators should be able to:
+
+- Manage customer accounts.
+- Manage products.
+- Set customer-specific pricing.
+- Receive and process orders.
+- Manage quotation requests.
+- Update order statuses.
+- Upload invoices and other documents.
+- View customer purchase histories.
+- Send customer notifications.
+- Manage internal users and permissions.
+
+These two experiences must be properly separated.
+
+Customers must never have access to internal administrative functions.
+
+---
+
+# 4. CUSTOMER AUTHENTICATION AND ACCOUNT MANAGEMENT
+
+Build a professional authentication experience.
+
+### Login page
+
+The login page should feel premium and simple.
+
+Include:
+
+- ClientHub branding.
+- Jeffery Group identification.
+- Email address field.
+- Password field.
+- Show/hide password control.
+- Remember me option.
+- Forgot password link.
+- Sign-in button.
+- Appropriate error messages.
+
+Do not make the login page unnecessarily complicated.
+
+### Registration
+
+The initial recommended business model is invitation-based customer registration.
+
+Customers should not immediately receive unrestricted access simply by creating an account.
+
+An administrator should be able to invite customers.
+
+Suggested workflow:
+
+1. Administrator creates a customer organization.
+2. Administrator enters the customer's email address.
+3. The platform sends an invitation.
+4. The customer receives an invitation link.
+5. The customer creates a password.
+6. The customer joins their organization's account.
+7. The customer receives access to approved products and information.
+
+Support multiple users belonging to the same customer organization.
+
+For example, a customer's purchasing manager and accounts payable employee may both need access to the same business account.
+
+Include appropriate user roles and permissions.
+
+### Account management
+
+Customers should have a settings page containing:
+
+- Business name.
+- Contact person.
+- Email address.
+- Phone number.
+- Billing address.
+- Shipping addresses.
+- Account details.
+- Password management.
+- Notification preferences.
+
+Important account information should be controlled by the appropriate administrator where necessary.
+
+---
+
+# 5. CUSTOMER DASHBOARD
+
+The customer dashboard is one of the most important screens in the entire application.
+
+It should provide an immediate overview of the customer's relationship with Jeffery Group.
+
+Design an elegant dashboard that prioritizes useful information.
+
+### Dashboard layout
+
+At the top:
+
+A personalized greeting.
+
+For example:
+
+"Good morning, [Customer Name]."
+
+Supporting text:
+
+"Here's an overview of your packaging orders and account activity."
+
+Include a prominent quick-action area.
+
+Possible actions:
+
+- Browse Products.
+- Place an Order.
+- Request a Quote.
+- View All Orders.
+
+### Summary cards
+
+Display useful information such as:
+
+1. Active Orders.
+2. Pending Quotations.
+3. Outstanding Invoices.
+4. Recent Orders.
+
+Cards should use refined typography and subtle visual indicators.
+
+Avoid oversized decorative icons.
+
+### Recent orders
+
+Display a clean table showing:
+
+- Order Number.
+- Order Date.
+- Product Summary.
+- Quantity.
+- Total Amount, if applicable.
+- Current Status.
+- Action.
+
+Users should be able to select an order to view its details.
+
+### Quick reorder
+
+Display frequently purchased products.
+
+Each item should include:
+
+- Product name.
+- Product image.
+- SKU.
+- Previous purchase quantity.
+- Last order date.
+- Reorder action.
+
+### Recent activity
+
+Display a chronological activity feed.
+
+Examples:
+
+- Your order has been confirmed.
+- Your quotation is ready.
+- Your invoice has been uploaded.
+- Your shipment has been dispatched.
+
+Use subtle status indicators.
+
+The dashboard should not feel cluttered.
+
+Prioritize the most important information.
+
+---
+
+# 6. PRODUCT CATALOGUE
+
+Build a sophisticated B2B packaging catalogue.
+
+Jeffery Group supplies packaging products, including corrugated cardboard products, pizza boxes, PET containers, and PP containers.
+
+The catalogue should be structured to accommodate these product categories and future product expansion.
+
+### Product categories
+
+Suggested categories:
+
+- Corrugated Packaging.
+- Pizza Boxes.
+- Food Packaging.
+- PET Containers.
+- PP Containers.
+- Custom Printed Packaging.
+- Other Packaging Products.
+
+Administrators must be able to create additional categories.
+
+### Product catalogue interface
+
+Customers should be able to:
+
+- Browse all approved products.
+- Search products.
+- Filter by category.
+- Filter by size.
+- Filter by material.
+- Sort products.
+- View product details.
+- Add products to an order.
+
+The product catalogue should have a polished and attractive appearance.
+
+Use a responsive product grid.
+
+Product cards should contain:
+
+- Product image.
+- Product name.
+- SKU.
+- Short description.
+- Relevant specifications.
+- Customer-specific price, where available.
+- Availability or enquiry status.
+- View Details button.
+
+Do not expose products that have not been approved for that customer.
+
+### Product detail page
+
+Every product should have its own detail page.
+
+Include:
+
+- Large product image.
+- Product name.
+- SKU.
+- Full product description.
+- Product specifications.
+- Dimensions.
+- Material.
+- Colour.
+- Printing options.
+- Packaging configuration.
+- Quantity per case.
+- Minimum order quantity.
+- Customer-specific pricing.
+- Additional information.
+
+Include a quantity selector.
+
+Include a clear Add to Order button.
+
+If the product requires custom specifications or an individualized quotation, provide a Request a Quote action instead.
+
+### Product image requirements
+
+Images should be displayed consistently.
+
+Maintain appropriate aspect ratios.
+
+Use clean product imagery.
+
+When actual product photographs are unavailable, use professional placeholder images clearly identified as examples.
+
+Never fabricate actual product specifications.
+
+---
+
+# 7. CUSTOMER-SPECIFIC PRICING
+
+This is an essential part of the platform.
+
+Jeffery Group operates in a B2B environment where different customers may have different negotiated prices.
+
+The system must support individualized pricing.
+
+For example:
+
+- Customer A has an agreed price for Product X.
+- Customer B has a different agreed price for Product X.
+- Customer C may need to request a quotation instead of seeing a fixed price.
+
+The administrator must be able to configure pricing for each customer.
+
+### Pricing functionality
+
+Build:
+
+1. Default product pricing.
+2. Customer-specific pricing.
+3. Customer-specific product availability.
+4. Minimum order quantities.
+5. Volume-based pricing where configured.
+6. Price effective dates.
+7. Price adjustment history.
+
+Customer-specific pricing must override default pricing when applicable.
+
+Customers must only see prices assigned to their own accounts.
+
+Never expose one customer's negotiated prices to another customer.
+
+Do not allow customers to modify their own agreed pricing.
+
+### Important
+
+The application must store prices as proper numerical monetary values with an explicit currency.
+
+Support Canadian dollars initially, while allowing future expansion to other currencies.
+
+Use accurate decimal calculations.
+
+Never rely on floating-point arithmetic for financial calculations.
+
+---
+
+# 8. SHOPPING CART AND ORDER SUBMISSION
+
+Create a professional B2B ordering experience.
+
+This is not intended to operate exactly like a public consumer shopping website.
+
+It should feel like a purchasing portal designed for wholesale customers.
+
+### Shopping cart
+
+Customers should be able to:
+
+- Add multiple products.
+- Modify quantities.
+- Remove products.
+- Review product specifications.
+- View applicable pricing.
+- View subtotal.
+- Review applicable taxes where configured.
+- Review order notes.
+- Select a shipping address.
+- Submit an order request.
+
+Quantities should respect product-specific minimum order quantities and packaging increments where configured.
+
+### Checkout process
+
+Keep the process simple.
+
+Suggested flow:
+
+Step 1: Review products.
+
+Step 2: Confirm quantities.
+
+Step 3: Confirm shipping address.
+
+Step 4: Add purchase order number and additional instructions.
+
+Step 5: Review the order.
+
+Step 6: Submit order request.
+
+### Order approval
+
+IMPORTANT:
+
+An order submission should initially be treated as an order request.
+
+It should not automatically become a confirmed order.
+
+Jeffery Group must be able to review:
+
+- Product availability.
+- Quantities.
+- Pricing.
+- Delivery requirements.
+- Any special instructions.
+
+An administrator should be able to approve, reject, or request changes.
+
+Only after the appropriate internal confirmation should the order become confirmed.
+
+Make this distinction very clear in the interface.
+
+Do not automatically promise inventory availability or delivery dates.
+
+The system should distinguish between requested, estimated, and confirmed information.
+
+---
+
+# 9. ONE-CLICK REORDERING
+
+This should be one of the strongest features of ClientHub.
+
+Many packaging customers purchase similar products repeatedly.
+
+Instead of entering all their product details every time, customers should be able to reorder from historical purchases.
+
+### How it works
+
+1. Customer opens Order History.
+2. Customer selects an earlier order.
+3. Customer clicks Reorder.
+4. The original products are added to a new cart.
+5. Quantities can be adjusted.
+6. Current customer-specific pricing is retrieved.
+7. Customer reviews the new order.
+8. Customer submits it for approval.
+
+Important:
+
+Do not automatically reuse outdated historical prices.
+
+Retrieve the current approved price for the customer.
+
+If a product has been discontinued or is no longer available, clearly notify the customer.
+
+Preserve the original order as an unchanged historical record.
+
+---
+
+# 10. ORDER MANAGEMENT AND TRACKING
+
+Give customers a clear overview of their order progress.
+
+### Customer order history
+
+Create a professional table containing:
+
+- Order Number.
+- Date Submitted.
+- Product Summary.
+- Quantity.
+- Order Amount.
+- Status.
+- Estimated Delivery Date, if confirmed or appropriately labelled.
+- View Order action.
+
+Include useful filtering:
+
+- All Orders.
+- Pending.
+- Confirmed.
+- Processing.
+- In Production.
+- Ready for Shipment.
+- Dispatched.
+- Delivered.
+- Cancelled.
+
+### Order statuses
+
+Support the following configurable status workflow:
+
+1. Order Submitted.
+2. Under Review.
+3. Awaiting Customer Confirmation.
+4. Confirmed.
+5. Processing.
+6. In Production.
+7. Ready for Shipment.
+8. Dispatched.
+9. Delivered.
+10. Cancelled.
+
+The administrator should be able to update the status.
+
+Record every status change in an order activity history.
+
+### Order details page
+
+Every order must have a detailed page.
+
+Include:
+
+- Order number.
+- Customer information.
+- Submission date.
+- Products.
+- Quantities.
+- Unit pricing.
+- Order subtotal.
+- Tax, where applicable.
+- Total.
+- Shipping address.
+- Purchase order reference.
+- Special instructions.
+- Current status.
+- Order status timeline.
+- Related documents.
+- Communication history.
+
+### Order tracking timeline
+
+Use a refined vertical or horizontal progress timeline.
+
+Clearly identify:
+
+- Completed steps.
+- Current step.
+- Upcoming steps.
+
+Include dates and relevant notes.
+
+Do not display invented shipment tracking information.
+
+If a shipment tracking number exists, display it.
+
+If it does not exist, do not fabricate one.
+
+---
+
+# 11. QUOTATION CENTRE
+
+Build a complete quotation request and management system.
+
+Customers frequently need pricing for customized products or larger orders.
+
+They should be able to request quotations directly through ClientHub.
+
+### Customer quotation form
+
+Include fields for:
+
+- Product category.
+- Product name, if known.
+- Dimensions.
+- Material.
+- Product colour.
+- Printing requirements.
+- Quantity.
+- Expected delivery date.
+- Shipping destination.
+- Special specifications.
+- Additional comments.
+- Artwork and attachment uploads.
+
+Make the form easy to complete.
+
+Use logical sections and conditional fields where appropriate.
+
+### Quotation management
+
+Administrators should receive new quotation requests in their dashboard.
+
+They should be able to:
+
+- Review customer requirements.
+- Add products.
+- Enter quantities.
+- Set unit prices.
+- Enter one-time costs or setup fees.
+- Include freight or additional costs.
+- Define quotation expiry dates.
+- Add terms and conditions.
+- Generate professional PDF quotations.
+- Send the quotation to the customer.
+
+### Customer quotation page
+
+Customers should be able to:
+
+- View quotations.
+- Download PDF quotations.
+- Accept quotations.
+- Reject quotations.
+- Request revisions.
+- Review quotation expiry dates.
+
+An accepted quotation should be capable of being converted into an order.
+
+Maintain a complete history of revisions and approvals.
+
+Never let an old quotation silently overwrite a newly issued quotation.
+
+---
+
+# 12. INVOICE AND DOCUMENT CENTRE
+
+Every customer should have a private document centre.
+
+Organize documents in a clean, professional interface.
+
+### Document categories
+
+- Invoices.
+- Purchase Orders.
+- Quotations.
+- Statements of Account.
+- Product Specifications.
+- Delivery Receipts.
+- Other Documents.
+
+### Customer capabilities
+
+Customers should be able to:
+
+- View their documents.
+- Search documents.
+- Filter by document category.
+- Filter by date.
+- Preview supported documents.
+- Download PDFs.
+- Access related orders.
+
+### Administrator capabilities
+
+Administrators should be able to:
+
+- Upload documents.
+- Assign documents to customers.
+- Associate documents with orders.
+- Categorize documents.
+- Add document descriptions.
+- Replace files with a version history where appropriate.
+- Remove documents according to permissions.
+
+Document privacy is critical.
+
+A customer must never be able to access another customer's invoices or documents.
+
+Use secure storage and authorization checks.
+
+---
+
+# 13. ADMINISTRATION DASHBOARD
+
+Create a completely separate administration experience.
+
+This dashboard will be used by Jeffery Group employees.
+
+It should have a professional, information-dense but elegant layout.
+
+It must make managing the platform easy.
+
+### Admin overview
+
+The overview dashboard should include:
+
+- Total active customers.
+- New order requests.
+- Pending quotations.
+- Confirmed orders.
+- Orders in production.
+- Outstanding invoices, if invoice information is available.
+- Recent customer activity.
+
+Include a recent orders table.
+
+Include pending tasks.
+
+Include a recent activity feed.
+
+Include useful charts where real data is available.
+
+Do not create meaningless charts just to fill space.
+
+### Admin navigation
+
+Create a sidebar containing:
+
+1. Overview.
+2. Orders.
+3. Quotations.
+4. Customers.
+5. Products.
+6. Pricing.
+7. Documents.
+8. Notifications.
+9. Users and Permissions.
+10. Settings.
+
+Navigation should be consistent.
+
+Highlight the current section.
+
+Support a collapsible sidebar.
+
+On mobile, use a well-designed navigation drawer.
+
+---
+
+# 14. CUSTOMER MANAGEMENT
+
+Administrators should have a dedicated customer management section.
+
+### Customer directory
+
+Display:
+
+- Business name.
+- Customer ID.
+- Primary contact.
+- Email.
+- Phone number.
+- Account status.
+- Number of orders.
+- Most recent order.
+- Registration date.
+
+Provide search and filtering.
+
+### Customer profile
+
+Each customer should have an individual management page.
+
+Include:
+
+- Company information.
+- Contacts.
+- Billing details.
+- Shipping addresses.
+- Assigned products.
+- Customer-specific prices.
+- Order history.
+- Quotations.
+- Invoices.
+- Documents.
+- Internal notes.
+- Account activity.
+
+### Customer account controls
+
+Administrators should be able to:
+
+- Create customer accounts.
+- Invite new customer users.
+- Edit customer information.
+- Activate or deactivate accounts.
+- Assign users to organizations.
+- Control product visibility.
+- Configure pricing.
+- Review account history.
+
+Support multiple individual users under one customer company.
+
+Internal notes must never be visible to customers.
+
+---
+
+# 15. PRODUCT MANAGEMENT
+
+Create a powerful but simple product administration system.
+
+Administrators should be able to:
+
+- Create products.
+- Edit products.
+- Archive products.
+- Upload product images.
+- Assign product categories.
+- Manage SKUs.
+- Enter product descriptions.
+- Define specifications.
+- Set default pricing.
+- Set minimum order quantities.
+- Configure units of measurement.
+- Configure packaging increments.
+- Control product visibility.
+- Assign products to individual customers.
+
+### Packaging specifications
+
+Allow flexible specifications because packaging products vary significantly.
+
+Potential attributes:
+
+- Length.
+- Width.
+- Height.
+- Dimensions and units.
+- Material.
+- Thickness.
+- Colour.
+- Printing colours.
+- Product weight.
+- Quantity per case.
+- Cases per pallet.
+- Manufacturing specifications.
+- Custom artwork.
+
+Not every product needs every field.
+
+Use product-specific attributes where appropriate.
+
+Do not force irrelevant specifications onto customers.
+
+---
+
+# 16. NOTIFICATIONS AND COMMUNICATIONS
+
+Implement a centralized notification system.
+
+### Email notifications
+
+Customers should receive appropriate notifications when:
+
+- Their account invitation is issued.
+- Their order is received.
+- Their order is confirmed.
+- Their order status changes.
+- Their quotation is available.
+- Their quotation is approaching expiry.
+- A new invoice is uploaded.
+- A new document is available.
+
+### In-app notifications
+
+Create a notification centre inside the customer portal.
+
+Use:
+
+- Unread indicators.
+- Notification timestamps.
+- Clear descriptions.
+- Relevant links.
+- Mark as read functionality.
+- Mark all as read functionality.
+
+### Administrative notifications
+
+Administrators should be notified when:
+
+- A customer submits an order.
+- A customer requests a quotation.
+- A customer accepts a quotation.
+- An important document is requested.
+- A customer sends a message.
+
+Support configurable notification preferences.
+
+Avoid sending excessive duplicate notifications.
+
+---
+
+# 17. CUSTOMER SUPPORT AND CONTACT
+
+Build a straightforward customer communication section.
+
+Customers should be able to contact Jeffery Group regarding:
+
+- Existing orders.
+- Products.
+- Quotations.
+- Invoices.
+- Delivery arrangements.
+- General inquiries.
+
+Whenever possible, associate messages with a specific order or quotation.
+
+Provide a clear contact experience.
+
+Do not build a complicated live-chat system for the initial version unless it is genuinely functional.
+
+A reliable inquiry and response system is more important.
+
+---
+
+# 18. FUTURE AI CAPABILITIES
+
+Design the application so AI features can be integrated in the future.
+
+Do not make AI gimmicky.
+
+AI should solve actual business problems.
+
+Potential future features include:
+
+### AI ordering assistant
+
+Customers could write:
+
+"I'd like to reorder the same pizza boxes as last month, but increase the quantity by 20%."
+
+The assistant could identify the previous order, prepare a draft cart, and ask for confirmation.
+
+### AI document processing
+
+Upload a purchase order PDF.
+
+AI extracts:
+
+- Product names.
+- SKUs.
+- Quantities.
+- Required dates.
+- Customer information.
+- Additional instructions.
+
+The information can then be reviewed before being turned into an order request.
+
+### AI customer service assistant
+
+Customers could ask:
+
+- "What's the status of my order?"
+- "Can I see my previous invoices?"
+- "What products did I order last month?"
+- "How do I reorder this product?"
+
+The assistant should retrieve information from authorized account records.
+
+### AI administrative assistant
+
+Administrators could eventually ask:
+
+- "Show all outstanding quotation requests."
+- "Which customers have not ordered recently?"
+- "Which orders are awaiting approval?"
+- "Show the orders currently in production."
+
+AI must only answer using authorized and verified information.
+
+Never make up prices, quantities, delivery dates, or financial figures.
+
+These are future enhancements. The core ordering and administrative systems must work without AI.
+
+---
+
+# 19. RESPONSIVE DESIGN
+
+ClientHub must be fully responsive.
+
+It must look excellent on:
+
+- Desktop computers.
+- Laptops.
+- Tablets.
+- iPhones.
+- Android phones.
+
+Do not simply shrink the desktop layout to fit mobile.
+
+Design appropriate mobile experiences.
+
+### Desktop
+
+Use an elegant sidebar and spacious working area.
+
+### Tablet
+
+Adjust the navigation and layout intelligently.
+
+### Mobile
+
+Use a mobile-friendly navigation structure.
+
+Tables should have appropriate responsive alternatives.
+
+Forms should be easy to complete on a phone.
+
+Buttons should have comfortable touch targets.
+
+Product cards should adapt to available width.
+
+All critical features must remain accessible.
+
+---
+
+# 20. TECHNOLOGY AND SOFTWARE ARCHITECTURE
+
+Build a modern, maintainable application.
+
+Preferred technology stack:
+
+**Frontend**
+- Next.js.
+- React.
+- TypeScript.
+- Tailwind CSS.
+- shadcn/ui.
+- Lucide icons.
+
+**Backend**
+- Supabase.
+- PostgreSQL.
+- Supabase Authentication.
+- Supabase Storage.
+
+**Hosting**
+- Vercel or another suitable deployment environment.
+
+**Email**
+- Resend or Brevo.
+
+If the existing project already uses a working technology stack, inspect it before making changes. Preserve useful existing functionality and avoid unnecessary migrations.
+
+### Database architecture
+
+Design a proper relational database.
+
+Suggested tables:
+
+- profiles
+- organizations
+- organization_members
+- invitations
+- products
+- product_categories
+- product_images
+- customer_product_access
+- customer_product_prices
+- orders
+- order_items
+- order_status_history
+- quotations
+- quotation_items
+- quotation_revisions
+- documents
+- notifications
+- customer_messages
+- audit_logs
+
+Include appropriate:
+
+- Primary keys.
+- Foreign keys.
+- Indexes.
+- Timestamps.
+- Relationships.
+- Validation rules.
+
+Use UUIDs where appropriate.
+
+Avoid duplicating unnecessary data.
+
+Preserve historical order and quotation information.
+
+### Security requirements
+
+This platform will contain commercial customer information.
+
+Security is not optional.
+
+Implement:
+
+- Secure authentication.
+- Proper authorization.
+- Role-based permissions.
+- Supabase Row Level Security.
+- Organization-level data isolation.
+- Private document storage.
+- Secure file access.
+- Input validation.
+- Server-side authorization checks.
+- Safe handling of user uploads.
+- Audit logging for important administrative actions.
+
+Never rely exclusively on hiding buttons or frontend navigation to protect data.
+
+All permissions must be enforced by the backend.
+
+A customer must not be able to change a URL or API request to access another customer's information.
+
+Never put private API keys or service-role credentials in client-side code.
+
+---
+
+# 21. USER EXPERIENCE REQUIREMENTS
+
+The platform must feel intuitive even for people who are not particularly familiar with technology.
+
+Prioritize clarity.
+
+Do not make users think unnecessarily.
+
+Every page should have a clear purpose.
+
+Every action should have an understandable result.
+
+Use descriptive labels.
+
+Avoid technical jargon in customer-facing interfaces.
+
+For forms:
+
+- Group related fields.
+- Use clear labels.
+- Provide useful validation.
+- Explain required fields.
+- Preserve entered data when possible.
+- Provide helpful error messages.
+
+For destructive actions:
+
+- Require confirmation.
+- Clearly communicate consequences.
+
+For loading states:
+
+- Use skeleton loaders.
+- Avoid sudden layout shifts.
+
+For empty states:
+
+- Explain what the user is seeing.
+- Provide an appropriate next action.
+
+For errors:
+
+- Explain what went wrong.
+- Offer a way to recover.
+
+Do not leave pages with generic "Coming Soon" messages for features that are supposed to be implemented.
+
+---
+
+# 22. EXACT VISUAL QUALITY EXPECTATIONS
+
+I want you to pay exceptional attention to visual execution.
+
+The application should not look like a typical AI-generated dashboard.
+
+Common problems that must be avoided:
+
+- Too many cards.
+- Excessive rounded corners.
+- Random gradients.
+- Oversized icons.
+- Poor typography.
+- Uneven spacing.
+- Inconsistent colours.
+- Too much information on one page.
+- Generic navigation.
+- Unnecessary decorative graphics.
+- Repetitive layouts.
+- Giant headings that waste space.
+- Buttons that look unfinished.
+- Tables that feel cramped.
+- Poorly designed mobile pages.
+- Fake charts.
+- Inconsistent icon sizes.
+
+### What I want instead
+
+I want a beautifully composed interface.
+
+Think about:
+
+- Perfect alignment.
+- Consistent spacing.
+- Excellent visual hierarchy.
+- Thoughtful information density.
+- Clean navigation.
+- Refined buttons.
+- Beautiful form inputs.
+- Excellent table design.
+- Professional status indicators.
+- Subtle motion.
+- Excellent empty states.
+- Beautiful typography.
+- Consistent visual patterns.
+
+The design should look as good as a premium commercial SaaS product.
+
+Do not sacrifice usability in pursuit of visual effects.
+
+---
+
+# 23. IMPLEMENTATION REQUIREMENTS
+
+I want you to actually build the application.
+
+Do not simply produce a design description.
+
+Do not stop after generating a landing page.
+
+Do not create a static mockup with buttons that do nothing.
+
+Build the working application with its major pages, reusable components, database integration, authentication, and real interactions.
+
+### Implementation priorities
+
+Priority 1:
+- Authentication.
+- Customer organizations.
+- Customer dashboard.
+- Product catalogue.
+- Customer-specific pricing.
+
+Priority 2:
+- Shopping cart.
+- Order submission.
+- Order history.
+- Order details.
+- Admin order management.
+
+Priority 3:
+- Customer management.
+- Quotation system.
+- Document centre.
+- Notifications.
+
+Priority 4:
+- Advanced administration.
+- Reporting.
+- AI integration preparation.
+
+### Important development instructions
+
+Before coding:
+
+1. Inspect the existing project structure.
+2. Identify the installed dependencies.
+3. Understand the existing database configuration.
+4. Identify reusable components.
+5. Determine which features are already implemented.
+6. Establish an implementation plan.
+
+Then proceed to development.
+
+Do not unnecessarily rewrite working code.
+
+Use reusable components.
+
+Keep the code organized and maintainable.
+
+Separate business logic from UI components.
+
+Use proper TypeScript types.
+
+Validate user input on the server.
+
+Implement appropriate error handling.
+
+Ensure database operations are secure.
+
+### Demo data
+
+Where actual business data is unavailable, use clearly identified demonstration data.
+
+Create realistic sample packaging products, orders, customers, and quotations to make the interface easy to evaluate.
+
+Never present invented demo revenue, inventory, customer records, or financial figures as real Jeffery Group business data.
+
+Make it possible to replace all demo data with actual business records.
+
+Do not hardcode business data throughout the frontend.
+
+---
+
+# 24. FINAL QUALITY ASSURANCE
+
+Before considering the application complete, test the entire experience.
+
+### Customer testing
+
+- Can a customer log in?
+- Can a customer view their dashboard?
+- Can they browse approved products?
+- Can they see their own pricing?
+- Can they add products to a cart?
+- Can they submit an order request?
+- Can they view order history?
+- Can they reorder an old purchase?
+- Can they request a quotation?
+- Can they access their own documents?
+- Can they receive notifications?
+
+### Administrator testing
+
+- Can an administrator log in?
+- Can they create a customer?
+- Can they invite a customer user?
+- Can they create products?
+- Can they set individual customer pricing?
+- Can they approve an order?
+- Can they update order statuses?
+- Can they create a quotation?
+- Can they upload documents?
+- Can they send notifications?
+- Can they manage access permissions?
+
+### Security testing
+
+- Can Customer A access Customer B's documents?
+- Can Customer A view Customer B's prices?
+- Can a customer access administrative routes?
+- Can unauthorized users modify orders?
+- Are private files protected?
+- Are authorization rules enforced server-side?
+
+All these scenarios must be tested.
+
+Fix errors rather than simply documenting them.
+
+### Visual quality testing
+
+Review the application at desktop, tablet, and mobile sizes.
+
+Check:
+
+- Spacing.
+- Alignment.
+- Typography.
+- Colour consistency.
+- Responsiveness.
+- Navigation.
+- Button states.
+- Form usability.
+- Table readability.
+- Loading states.
+- Empty states.
+
+Do not consider an unfinished or inconsistent mobile experience acceptable.
+
+---
+
+# 25. THE FINAL VISION
+
+I want ClientHub to become the primary online interface between Jeffery Group and its business customers.
+
+When a customer receives their login credentials, they should feel that they are dealing with an established, modern, sophisticated packaging supplier.
+
+When they log in, everything they need should be available in one place.
+
+They should be able to find their products, understand their pricing, place orders, request quotations, follow order progress, and retrieve their documents without repeatedly contacting employees.
+
+At the same time, Jeffery Group should have a powerful internal system that makes customer management and order processing much easier.
+
+The application should be scalable enough to accommodate additional customers, products, employees, and business processes in the future.
+
+### Final design instruction
+
+Please take the visual quality of this project extremely seriously.
+
+I do not want an average-looking website.
+
+I want an exceptionally polished, beautiful, modern, premium, and sophisticated product.
+
+Every screen should feel intentional.
+
+Every component should look professionally designed.
+
+Every interaction should feel smooth.
+
+The finished product should be something that a company could confidently present to its largest business customers.
+
+**Build ClientHub as a real, functional, premium B2B SaaS platform — not just a website that looks attractive in screenshots.**
+
+Prioritize product quality, visual excellence, usability, reliability, and security throughout the entire development process.

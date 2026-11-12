@@ -1,0 +1,723 @@
+     1→"use client";
+     2→
+     3→// Administration — product catalogue management: search + category filter,
+     4→// create/edit product dialogs (the edit dialog IS the detail editor) and
+     5→// archive toggles.
+     6→
+     7→import { useState } from "react";
+     8→import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+     9→import {
+    10→  Archive,
+    11→  ArchiveRestore,
+    12→  Package,
+    13→  PencilLine,
+    14→  Plus,
+    15→  X,
+    16→} from "lucide-react";
+    17→import { Button } from "@/components/ui/button";
+    18→import { Input } from "@/components/ui/input";
+    19→import { Label } from "@/components/ui/label";
+    20→import { Textarea } from "@/components/ui/textarea";
+    21→import {
+    22→  Select,
+    23→  SelectContent,
+    24→  SelectItem,
+    25→  SelectTrigger,
+    26→  SelectValue,
+    27→} from "@/components/ui/select";
+    28→import {
+    29→  AlertDialog,
+    30→  AlertDialogAction,
+    31→  AlertDialogCancel,
+    32→  AlertDialogContent,
+    33→  AlertDialogDescription,
+    34→  AlertDialogFooter,
+    35→  AlertDialogHeader,
+    36→  AlertDialogTitle,
+    37→  AlertDialogTrigger,
+    38→} from "@/components/ui/alert-dialog";
+    39→import { Table, TableBody, TableHeader, TableRow } from "@/components/ui/table";
+    40→import {
+    41→  Dialog,
+    42→  DialogContent,
+    43→  DialogFooter,
+    44→  DialogHeader,
+    45→  DialogTitle,
+    46→} from "@/components/ui/dialog";
+    47→import { PageHeader } from "@/components/shared/page-header";
+    48→import { Money } from "@/components/shared/money";
+    49→import { StockBadge } from "@/components/shared/status-badge";
+    50→import { ProductArtwork } from "@/components/shared/product-artwork";
+    51→import { EmptyState } from "@/components/shared/empty-state";
+    52→import { api } from "@/lib/api-client";
+    53→import { centsToInputValue, parseDollarsToCents } from "@/lib/money";
+    54→import { STOCK_STATUSES, STOCK_STATUS_LABELS } from "@/lib/constants";
+    55→import { toast } from "@/hooks/use-toast";
+    56→import type { AdminProduct, CategoryDto } from "@/types";
+    57→import {
+    58→  FieldError,
+    59→  GroupLabel,
+    60→  InlineError,
+    61→  RowsSkeleton,
+    62→  SearchField,
+    63→  SectionCard,
+    64→  Td,
+    65→  Th,
+    66→  Toolbar,
+    67→  useDebouncedValue,
+    68→  ViewEnter,
+    69→} from "./admin-ui";
+    70→
+    71→const ALL = "ALL";
+    72→const UNITS = ["each", "case"] as const;
+    73→
+    74→type ProductForm = {
+    75→  sku: string;
+    76→  name: string;
+    77→  categoryId: string;
+    78→  shortDescription: string;
+    79→  description: string;
+    80→  material: string;
+    81→  dimensions: string;
+    82→  colour: string;
+    83→  printingOptions: string;
+    84→  casePack: string;
+    85→  palletPack: string;
+    86→  minOrderQty: string;
+    87→  increment: string;
+    88→  unit: string;
+    89→  defaultPrice: string;
+    90→  stockStatus: string;
+    91→  leadTimeNote: string;
+    92→};
+    93→
+    94→const EMPTY_PRODUCT_FORM: ProductForm = {
+    95→  sku: "",
+    96→  name: "",
+    97→  categoryId: "",
+    98→  shortDescription: "",
+    99→  description: "",
+   100→  material: "",
+   101→  dimensions: "",
+   102→  colour: "",
+   103→  printingOptions: "",
+   104→  casePack: "100",
+   105→  palletPack: "",
+   106→  minOrderQty: "500",
+   107→  increment: "100",
+   108→  unit: "each",
+   109→  defaultPrice: "",
+   110→  stockStatus: "IN_STOCK",
+   111→  leadTimeNote: "",
+   112→};
+   113→
+   114→export function AdminProductsView() {
+   115→  const [search, setSearch] = useState("");
+   116→  const [category, setCategory] = useState<string>(ALL);
+   117→  const [createOpen, setCreateOpen] = useState(false);
+   118→  const [editing, setEditing] = useState<AdminProduct | null>(null);
+   119→  const debouncedSearch = useDebouncedValue(search);
+   120→
+   121→  const { data: categories } = useQuery({
+   122→    queryKey: ["admin", "settings"],
+   123→    queryFn: () => api.get<{ categories: CategoryDto[] }>("/api/admin/settings"),
+   124→  });
+   125→
+   126→  const params = new URLSearchParams();
+   127→  if (debouncedSearch.trim()) params.set("search", debouncedSearch.trim());
+   128→  if (category !== ALL) params.set("category", category);
+   129→  const qs = params.toString();
+   130→
+   131→  const { data, isLoading, isError, error } = useQuery({
+   132→    queryKey: ["admin", "products", { search: debouncedSearch.trim(), category }],
+   133→    queryFn: () => api.get<AdminProduct[]>(`/api/admin/products${qs ? `?${qs}` : ""}`),
+   134→  });
+   135→
+   136→  const queryClient = useQueryClient();
+   137→  const archive = useMutation({
+   138→    mutationFn: (payload: { id: string; archive: boolean; sku: string }) =>
+   139→      api.post<{ ok: boolean }>(`/api/admin/products/${payload.id}/archive`, { archive: payload.archive }),
+   140→    onSuccess: (_res, payload) => {
+   141→      queryClient.invalidateQueries({ queryKey: ["admin", "products"] });
+   142→      toast({
+   143→        title: payload.archive ? "Product archived" : "Product restored",
+   144→      });
+   145→    },
+   146→    onError: (err: Error) => toast({ title: "Could not archive product", description: err.message }),
+   147→  });
+   148→
+   149→  const products = data ?? [];
+   150→  const filtersActive = search.trim() !== "" || category !== ALL;
+   151→  const categoryList = categories?.categories ?? [];
+   152→
+   153→  return (
+   154→    <div>
+   155→      <PageHeader
+   156→        title="Products"
+   157→        actions={
+   158→          <Button className="gap-1.5" onClick={() => setCreateOpen(true)}>
+   159→            <Plus className="size-4" aria-hidden />
+   160→            New product
+   161→          </Button>
+   162→        }
+   163→      />
+   164→
+   165→      <ViewEnter>
+   166→      <Toolbar>
+   167→        <Select value={category} onValueChange={setCategory}>
+   168→          <SelectTrigger size="sm" className="h-9 w-full sm:w-[240px] text-body-sm" aria-label="Filter by category">
+   169→            <SelectValue placeholder="All categories" />
+   170→          </SelectTrigger>
+   171→          <SelectContent>
+   172→            <SelectItem value={ALL}>All categories</SelectItem>
+   173→            {categoryList.map((c) => (
+   174→              <SelectItem key={c.id} value={c.id}>
+   175→                {c.name}
+   176→              </SelectItem>
+   177→            ))}
+   178→          </SelectContent>
+   179→        </Select>
+   180→
+   181→        <SearchField
+   182→          value={search}
+   183→          onChange={setSearch}
+   184→          placeholder="Search name or SKU…"
+   185→          ariaLabel="Search products"
+   186→          className="sm:max-w-[280px]"
+   187→        />
+   188→
+   189→        <div className="ml-auto flex items-center gap-2">
+   190→          {products.length > 0 && (
+   191→            <p className="tnum whitespace-nowrap text-caption text-muted-foreground">
+   192→              {products.length} {products.length === 1 ? "product" : "products"}
+   193→            </p>
+   194→          )}
+   195→          {filtersActive && (
+   196→            <Button
+   197→              variant="ghost"
+   198→              size="sm"
+   199→              className="gap-1.5 text-muted-foreground"
+   200→              onClick={() => {
+   201→                setSearch("");
+   202→                setCategory(ALL);
+   203→              }}
+   204→            >
+   205→              <X className="size-3.5" aria-hidden />
+   206→              Clear
+   207→            </Button>
+   208→          )}
+   209→        </div>
+   210→      </Toolbar>
+   211→
+   212→      {isError ? (
+   213→        <InlineError message={error instanceof Error ? error.message : "Could not load products."} />
+   214→      ) : isLoading ? (
+   215→        <SectionCard>
+   216→          <RowsSkeleton rows={7} />
+   217→        </SectionCard>
+   218→      ) : products.length === 0 ? (
+   219→        <EmptyState
+   220→          icon={Package}
+   221→          title={filtersActive ? "No matching products" : "No products yet"}
+   222→          action={
+   223→            filtersActive ? (
+   224→              <Button
+   225→                variant="outline"
+   226→                onClick={() => {
+   227→                  setSearch("");
+   228→                  setCategory(ALL);
+   229→                }}
+   230→              >
+   231→                Clear filters
+   232→              </Button>
+   233→            ) : undefined
+   234→          }
+   235→        />
+   236→      ) : (
+   237→        <SectionCard bodyClassName="p-0">
+   238→          {/* Desktop table */}
+   239→          <div className="hidden max-h-[60vh] overflow-auto md:block">
+   240→            <Table className="min-w-[980px]">
+   241→              <TableHeader className="sticky top-0 z-10 bg-[var(--surface-sunken)]">
+   242→                <TableRow className="hover:bg-transparent">
+   243→                  <Th>Product</Th>
+   244→                  <Th>SKU</Th>
+   245→                  <Th>Category</Th>
+   246→                  <Th className="text-right">Default price</Th>
+   247→                  <Th>Stock</Th>
+   248→                  <Th>MOQ / Increment</Th>
+   249→                  <Th className="text-right">Customers</Th>
+   250→                  <Th>Status</Th>
+   251→                  <Th className="text-right">Actions</Th>
+   252→                </TableRow>
+   253→              </TableHeader>
+   254→              <TableBody>
+   255→                {products.map((p) => (
+   256→                  <TableRow key={p.id}>
+   257→                    <Td className="max-w-[260px] whitespace-normal">
+   258→                      <div className="flex items-center gap-3">
+   259→                        <ProductArtwork sku={p.sku} compact className="h-10 w-10 shrink-0 p-1.5" />
+   260→                        <div className="min-w-0">
+   261→                          <p className="truncate font-medium">{p.name}</p>
+   262→                          <p className="truncate text-caption text-muted-foreground">{p.shortDescription}</p>
+   263→                        </div>
+   264→                      </div>
+   265→                    </Td>
+   266→                    <Td>
+   267→                      <span className="font-mono text-body-sm">{p.sku}</span>
+   268→                    </Td>
+   269→                    <Td className="text-muted-foreground">{p.categoryName}</Td>
+   270→                    <Td className="text-right">
+   271→                      {p.defaultPriceCents !== null ? (
+   272→                        <Money cents={p.defaultPriceCents} />
+   273→                      ) : (
+   274→                        <span className="text-caption text-muted-foreground">Quote</span>
+   275→                      )}
+   276→                    </Td>
+   277→                    <Td>
+   278→                      <StockBadge status={p.stockStatus} />
+   279→                    </Td>
+   280→                    <Td className="whitespace-nowrap text-muted-foreground">
+   281→                      <span className="tnum">{p.minOrderQty.toLocaleString()}</span> /{" "}
+   282→                      <span className="tnum">+{p.increment.toLocaleString()}</span>
+   283→                    </Td>
+   284→                    <Td className="tnum text-right text-muted-foreground">
+   285→                      <span title="Approved customers">{p.approvedOrgCount}</span>
+   286→                      {p.customPriceCount > 0 && (
+   287→                        <span className="ml-1.5 text-caption text-kraft-ink" title="Customers with custom pricing">
+   288→                          · {p.customPriceCount} custom
+   289→                        </span>
+   290→                      )}
+   291→                    </Td>
+   292→                    <Td>
+   293→                      {p.isActive ? (
+   294→                        <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--status-done-bg)] px-2 py-0.5 text-caption font-medium text-[var(--status-done-fg)]">
+   295→                          <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" aria-hidden />
+   296→                          Active
+   297→                        </span>
+   298→                      ) : (
+   299→                        <span className="inline-flex items-center gap-1.5 rounded-full border bg-secondary px-2 py-0.5 text-caption font-medium text-muted-foreground">
+   300→                          <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" aria-hidden />
+   301→                          Archived
+   302→                        </span>
+   303→                      )}
+   304→                    </Td>
+   305→                    <Td>
+   306→                      <div className="flex items-center justify-end gap-1">
+   307→                        <Button
+   308→                          variant="ghost"
+   309→                          size="icon"
+   310→                          className="size-7 text-muted-foreground hover:text-foreground"
+   311→                          aria-label={`Edit ${p.name}`}
+   312→                          onClick={() => setEditing(p)}
+   313→                        >
+   314→                          <PencilLine className="size-3.5" aria-hidden />
+   315→                        </Button>
+   316→                        {p.isActive ? (
+   317→                          <AlertDialog>
+   318→                            <AlertDialogTrigger asChild>
+   319→                              <Button
+   320→                                variant="ghost"
+   321→                                size="icon"
+   322→                                className="size-7 text-muted-foreground hover:text-[var(--status-danger-fg)]"
+   323→                                aria-label={`Archive ${p.name}`}
+   324→                              >
+   325→                                <Archive className="size-3.5" aria-hidden />
+   326→                              </Button>
+   327→                            </AlertDialogTrigger>
+   328→                            <AlertDialogContent>
+   329→                              <AlertDialogHeader>
+   330→                                <AlertDialogTitle>Archive {p.name}?</AlertDialogTitle>
+   331→                                <AlertDialogDescription className="leading-relaxed">
+   332→                                  The product disappears from active catalogues and new orders, but existing orders,
+   333→                                  documents and custom pricing are preserved. You can restore it at any time.
+   334→                                </AlertDialogDescription>
+   335→                              </AlertDialogHeader>
+   336→                              <AlertDialogFooter>
+   337→                                <AlertDialogCancel>Keep active</AlertDialogCancel>
+   338→                                <AlertDialogAction
+   339→                                  className="bg-destructive text-white shadow-xs hover:bg-destructive/90 focus-visible:ring-destructive/35"
+   340→                                  disabled={archive.isPending}
+   341→                                  onClick={() => archive.mutate({ id: p.id, archive: true, sku: p.sku })}
+   342→                                >
+   343→                                  Yes, archive product
+   344→                                </AlertDialogAction>
+   345→                              </AlertDialogFooter>
+   346→                            </AlertDialogContent>
+   347→                          </AlertDialog>
+   348→                        ) : (
+   349→                          <Button
+   350→                            variant="ghost"
+   351→                            size="icon"
+   352→                            className="size-7 text-muted-foreground hover:text-[var(--status-done-fg)]"
+   353→                            aria-label={`Restore ${p.name}`}
+   354→                            disabled={archive.isPending}
+   355→                            onClick={() => archive.mutate({ id: p.id, archive: false, sku: p.sku })}
+   356→                          >
+   357→                            <ArchiveRestore className="size-3.5" aria-hidden />
+   358→                          </Button>
+   359→                        )}
+   360→                      </div>
+   361→                    </Td>
+   362→                  </TableRow>
+   363→                ))}
+   364→              </TableBody>
+   365→            </Table>
+   366→          </div>
+   367→
+   368→          {/* Mobile stacked cards */}
+   369→          <ul className="space-y-3 p-4 md:hidden">
+   370→            {products.map((p) => (
+   371→              <li key={p.id} className="rounded-[14px] border bg-card p-4 shadow-xs">
+   372→                <div className="flex items-start gap-3">
+   373→                  <ProductArtwork sku={p.sku} compact className="h-12 w-12 shrink-0 p-1.5" />
+   374→                  <div className="min-w-0 flex-1">
+   375→                    <p className="truncate text-body-sm font-medium">{p.name}</p>
+   376→                    <p className="font-mono text-caption text-muted-foreground">
+   377→                      {p.sku} · {p.categoryName}
+   378→                    </p>
+   379→                  </div>
+   380→                  {p.isActive ? <StockBadge status={p.stockStatus} /> : null}
+   381→                </div>
+   382→                <div className="mt-3 flex items-center justify-between border-t pt-2.5 text-caption text-muted-foreground">
+   383→                  <span>
+   384→                    {p.defaultPriceCents !== null ? <Money cents={p.defaultPriceCents} /> : "Quote required"}
+   385→                    {` · MOQ ${p.minOrderQty.toLocaleString()}`}
+   386→                  </span>
+   387→                  <span>{p.approvedOrgCount} customers</span>
+   388→                </div>
+   389→                <div className="mt-3 flex justify-end gap-1.5">
+   390→                  <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setEditing(p)}>
+   391→                    <PencilLine className="size-3.5" aria-hidden /> Edit
+   392→                  </Button>
+   393→                  {p.isActive ? (
+   394→                    <AlertDialog>
+   395→                      <AlertDialogTrigger asChild>
+   396→                        <Button variant="outline" size="sm" className="gap-1.5 text-[var(--status-danger-fg)] hover:bg-[var(--status-danger-bg)]">
+   397→                          <Archive className="size-3.5" aria-hidden /> Archive
+   398→                        </Button>
+   399→                      </AlertDialogTrigger>
+   400→                      <AlertDialogContent>
+   401→                        <AlertDialogHeader>
+   402→                          <AlertDialogTitle>Archive {p.name}?</AlertDialogTitle>
+   403→                          <AlertDialogDescription className="leading-relaxed">
+   404→                            The product disappears from active catalogues and new orders. Existing data is preserved and
+   405→                            you can restore it at any time.
+   406→                          </AlertDialogDescription>
+   407→                        </AlertDialogHeader>
+   408→                        <AlertDialogFooter>
+   409→                          <AlertDialogCancel>Keep active</AlertDialogCancel>
+   410→                          <AlertDialogAction
+   411→                            className="bg-destructive text-white shadow-xs hover:bg-destructive/90 focus-visible:ring-destructive/35"
+   412→                            onClick={() => archive.mutate({ id: p.id, archive: true, sku: p.sku })}
+   413→                          >
+   414→                            Yes, archive
+   415→                          </AlertDialogAction>
+   416→                        </AlertDialogFooter>
+   417→                      </AlertDialogContent>
+   418→                    </AlertDialog>
+   419→                  ) : (
+   420→                    <Button
+   421→                      variant="outline"
+   422→                      size="sm"
+   423→                      className="gap-1.5 text-[var(--status-done-fg)] hover:bg-[var(--status-done-bg)]"
+   424→                      onClick={() => archive.mutate({ id: p.id, archive: false, sku: p.sku })}
+   425→                    >
+   426→                      <ArchiveRestore className="size-3.5" aria-hidden /> Restore
+   427→                    </Button>
+   428→                  )}
+   429→                </div>
+   430→              </li>
+   431→            ))}
+   432→          </ul>
+   433→        </SectionCard>
+   434→      )}
+   435→      </ViewEnter>
+   436→
+   437→      {/* Create / edit dialogs */}
+   438→      {categoryList.length > 0 && (
+   439→        <ProductDialog
+   440→          key="create"
+   441→          categories={categoryList}
+   442→          open={createOpen}
+   443→          onOpenChange={setCreateOpen}
+   444→        />
+   445→      )}
+   446→      {editing && (
+   447→        <ProductDialog
+   448→          key={`edit-${editing.id}`}
+   449→          categories={categoryList}
+   450→          product={editing}
+   451→          open={editing !== null}
+   452→          onOpenChange={(v) => {
+   453→            if (!v) setEditing(null);
+   454→          }}
+   455→        />
+   456→      )}
+   457→    </div>
+   458→  );
+   459→}
+   460→
+   461→// ─── Product create / edit dialog ─────────────────────────────────────
+   462→
+   463→function ProductDialog({
+   464→  categories,
+   465→  product,
+   466→  open,
+   467→  onOpenChange,
+   468→}: {
+   469→  categories: CategoryDto[];
+   470→  product?: AdminProduct;
+   471→  open: boolean;
+   472→  onOpenChange: (v: boolean) => void;
+   473→}) {
+   474→  const queryClient = useQueryClient();
+   475→  const isEdit = Boolean(product);
+   476→
+   477→  const [form, setForm] = useState<ProductForm>(() =>
+   478→    product
+   479→      ? {
+   480→          sku: product.sku,
+   481→          name: product.name,
+   482→          categoryId: product.categoryId,
+   483→          shortDescription: product.shortDescription,
+   484→          description: product.description,
+   485→          material: product.material ?? "",
+   486→          dimensions: product.dimensions ?? "",
+   487→          colour: product.colour ?? "",
+   488→          printingOptions: product.printingOptions ?? "",
+   489→          casePack: String(product.casePack),
+   490→          palletPack: product.palletPack != null ? String(product.palletPack) : "",
+   491→          minOrderQty: String(product.minOrderQty),
+   492→          increment: String(product.increment),
+   493→          unit: product.unit,
+   494→          defaultPrice: product.defaultPriceCents != null ? centsToInputValue(product.defaultPriceCents) : "",
+   495→          stockStatus: product.stockStatus,
+   496→          leadTimeNote: product.leadTimeNote ?? "",
+   497→        }
+   498→      : { ...EMPTY_PRODUCT_FORM },
+   499→  );
+   500→  const [submitError, setSubmitError] = useState<string | null>(null);
+   501→
+   502→  const parsedPrice = form.defaultPrice.trim() === "" ? null : parseDollarsToCents(form.defaultPrice);
+   503→  const priceInvalid = form.defaultPrice.trim() !== "" && parsedPrice === null;
+   504→
+   505→  const save = useMutation<{ ok: boolean } | { id: string }, Error>({
+   506→    mutationFn: async (): Promise<{ ok: boolean } | { id: string }> => {
+   507→      const payload = {
+   508→        sku: form.sku.trim(),
+   509→        name: form.name.trim(),
+   510→        categoryId: form.categoryId,
+   511→        shortDescription: form.shortDescription.trim(),
+   512→        description: form.description.trim(),
+   513→        material: form.material.trim() || null,
+   514→        dimensions: form.dimensions.trim() || null,
+   515→        colour: form.colour.trim() || null,
+   516→        printingOptions: form.printingOptions.trim() || null,
+   517→        casePack: Number.parseInt(form.casePack, 10),
+   518→        palletPack: form.palletPack.trim() === "" ? null : Number.parseInt(form.palletPack, 10),
+   519→        minOrderQty: Number.parseInt(form.minOrderQty, 10),
+   520→        increment: Number.parseInt(form.increment, 10),
+   521→        unit: form.unit,
+   522→        defaultPriceCents: form.defaultPrice.trim() === "" ? null : parsedPrice,
+   523→        stockStatus: form.stockStatus,
+   524→        leadTimeNote: form.leadTimeNote.trim() || null,
+   525→      };
+   526→      return isEdit
+   527→        ? api.put<{ ok: boolean }>(`/api/admin/products/${product!.id}`, payload)
+   528→        : api.post<{ id: string }>("/api/admin/products", payload);
+   529→    },
+   530→    onSuccess: () => {
+   531→      queryClient.invalidateQueries({ queryKey: ["admin", "products"] });
+   532→      queryClient.invalidateQueries({ queryKey: ["admin", "pricing"] });
+   533→      queryClient.invalidateQueries({ queryKey: ["admin", "overview"] });
+   534→      onOpenChange(false);
+   535→      toast({
+   536→        title: isEdit ? "Product updated" : "Product created",
+   537→      });
+   538→    },
+   539→    onError: (err: Error) => setSubmitError(err.message),
+   540→  });
+   541→
+   542→  const set =
+   543→    (key: keyof ProductForm) =>
+   544→    (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+   545→      setForm((f) => ({ ...f, [key]: e.target.value }));
+   546→
+   547→  function submit(e: React.FormEvent) {
+   548→    e.preventDefault();
+   549→    setSubmitError(null);
+   550→    if (!form.sku.trim() || !form.name.trim() || !form.categoryId || !form.shortDescription.trim() || !form.description.trim()) {
+   551→      setSubmitError("SKU, name, category and both descriptions are required.");
+   552→      return;
+   553→    }
+   554→    for (const [label, raw] of [
+   555→      ["Case pack", form.casePack],
+   556→      ["Minimum order quantity", form.minOrderQty],
+   557→      ["Quantity increment", form.increment],
+   558→    ] as const) {
+   559→      const n = Number.parseInt(raw, 10);
+   560→      if (!Number.isFinite(n) || n < 1) {
+   561→        setSubmitError(`${label} must be a whole number of 1 or more.`);
+   562→        return;
+   563→      }
+   564→    }
+   565→    if (form.palletPack.trim() !== "" && !(Number.parseInt(form.palletPack, 10) >= 1)) {
+   566→      setSubmitError("Pallet pack must be a whole number of 1 or more.");
+   567→      return;
+   568→    }
+   569→    if (priceInvalid) {
+   570→      setSubmitError("Default price must be a valid dollar amount (e.g. 0.42), or blank for quote-required.");
+   571→      return;
+   572→    }
+   573→    save.mutate();
+   574→  }
+   575→
+   576→  return (
+   577→    <Dialog open={open} onOpenChange={(v) => { onOpenChange(v); if (!v) setSubmitError(null); }}>
+   578→      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-[640px]">
+   579→        <form onSubmit={submit} className="space-y-5">
+   580→          <DialogHeader className="border-b pb-4">
+   581→            <DialogTitle>
+   582→              {isEdit ? `Edit product, ${product!.sku}` : "New product"}
+   583→            </DialogTitle>
+   584→          </DialogHeader>
+   585→
+   586→          <div className="grid gap-3.5 sm:grid-cols-2">
+   587→            <div className="space-y-1.5">
+   588→              <Label htmlFor="prod-sku" className="text-body-sm">SKU</Label>
+   589→              <Input id="prod-sku" value={form.sku} onChange={set("sku")} placeholder="JG-CB-MAI4" className="h-9 font-mono text-body-sm" required />
+   590→            </div>
+   591→            <div className="space-y-1.5">
+   592→              <Label htmlFor="prod-name" className="text-body-sm">Product name</Label>
+   593→              <Input id="prod-name" value={form.name} onChange={set("name")} placeholder="White Mailer Carton 10 × 7 × 4 in" className="h-9 text-body-sm" required />
+   594→            </div>
+   595→            <div className="space-y-1.5 sm:col-span-2">
+   596→              <Label htmlFor="prod-category" className="text-body-sm">Category</Label>
+   597→              <Select value={form.categoryId} onValueChange={(v) => setForm((f) => ({ ...f, categoryId: v }))}>
+   598→                <SelectTrigger id="prod-category" className="h-9 w-full text-body-sm" aria-label="Product category">
+   599→                  <SelectValue placeholder="Choose a category…" />
+   600→                </SelectTrigger>
+   601→                <SelectContent>
+   602→                  {categories.map((c) => (
+   603→                    <SelectItem key={c.id} value={c.id}>
+   604→                      {c.name}
+   605→                    </SelectItem>
+   606→                  ))}
+   607→                </SelectContent>
+   608→              </Select>
+   609→            </div>
+   610→            <div className="space-y-1.5 sm:col-span-2">
+   611→              <Label htmlFor="prod-short" className="text-body-sm">Short description <span className="text-muted-foreground">(catalogue card)</span></Label>
+   612→              <Input id="prod-short" value={form.shortDescription} onChange={set("shortDescription")} placeholder="Standard 10-inch pizza box, lock-corner, kraft." className="h-9 text-body-sm" required />
+   613→            </div>
+   614→            <div className="space-y-1.5 sm:col-span-2">
+   615→              <Label htmlFor="prod-desc" className="text-body-sm">Full description</Label>
+   616→              <Textarea id="prod-desc" rows={3} value={form.description} onChange={set("description")} placeholder="Construction, performance and packaging details…" className="text-body-sm" required />
+   617→            </div>
+   618→
+   619→            <GroupLabel className="sm:col-span-2">Specifications</GroupLabel>
+   620→            <div className="space-y-1.5">
+   621→              <Label htmlFor="prod-dimensions" className="text-body-sm">Dimensions</Label>
+   622→              <Input id="prod-dimensions" value={form.dimensions} onChange={set("dimensions")} placeholder="10 × 10 × 1.75 in" className="h-9 text-body-sm" />
+   623→            </div>
+   624→            <div className="space-y-1.5">
+   625→              <Label htmlFor="prod-material" className="text-body-sm">Material</Label>
+   626→              <Input id="prod-material" value={form.material} onChange={set("material")} placeholder="Single-wall corrugated kraft" className="h-9 text-body-sm" />
+   627→            </div>
+   628→            <div className="space-y-1.5">
+   629→              <Label htmlFor="prod-colour" className="text-body-sm">Colour</Label>
+   630→              <Input id="prod-colour" value={form.colour} onChange={set("colour")} placeholder="Natural kraft" className="h-9 text-body-sm" />
+   631→            </div>
+   632→            <div className="space-y-1.5">
+   633→              <Label htmlFor="prod-printing" className="text-body-sm">Printing options</Label>
+   634→              <Input id="prod-printing" value={form.printingOptions} onChange={set("printingOptions")} placeholder="1 to 4 colour flexo on volume" className="h-9 text-body-sm" />
+   635→            </div>
+   636→
+   637→            <GroupLabel className="sm:col-span-2">Ordering rules</GroupLabel>
+   638→            <div className="space-y-1.5">
+   639→              <Label htmlFor="prod-casepack" className="text-body-sm">Case pack</Label>
+   640→              <Input id="prod-casepack" inputMode="numeric" value={form.casePack} onChange={set("casePack")} placeholder="100" className="tnum h-9 text-body-sm" required />
+   641→            </div>
+   642→            <div className="space-y-1.5">
+   643→              <Label htmlFor="prod-palletpack" className="text-body-sm">Pallet pack <span className="text-muted-foreground">(optional)</span></Label>
+   644→              <Input id="prod-palletpack" inputMode="numeric" value={form.palletPack} onChange={set("palletPack")} placeholder="1200" className="tnum h-9 text-body-sm" />
+   645→            </div>
+   646→            <div className="space-y-1.5">
+   647→              <Label htmlFor="prod-moq" className="text-body-sm">Minimum order qty</Label>
+   648→              <Input id="prod-moq" inputMode="numeric" value={form.minOrderQty} onChange={set("minOrderQty")} placeholder="500" className="tnum h-9 text-body-sm" required />
+   649→            </div>
+   650→            <div className="space-y-1.5">
+   651→              <Label htmlFor="prod-increment" className="text-body-sm">Quantity increment</Label>
+   652→              <Input id="prod-increment" inputMode="numeric" value={form.increment} onChange={set("increment")} placeholder="100" className="tnum h-9 text-body-sm" required />
+   653→            </div>
+   654→            <div className="space-y-1.5">
+   655→              <Label htmlFor="prod-unit" className="text-body-sm">Sold per</Label>
+   656→              <Select value={form.unit} onValueChange={(v) => setForm((f) => ({ ...f, unit: v }))}>
+   657→                <SelectTrigger id="prod-unit" className="h-9 w-full text-body-sm" aria-label="Selling unit">
+   658→                  <SelectValue />
+   659→                </SelectTrigger>
+   660→                <SelectContent>
+   661→                  {UNITS.map((u) => (
+   662→                    <SelectItem key={u} value={u}>
+   663→                      {u === "each" ? "Each (per piece)" : "Case"}
+   664→                    </SelectItem>
+   665→                  ))}
+   666→                </SelectContent>
+   667→              </Select>
+   668→            </div>
+   669→            <div className="space-y-1.5">
+   670→              <Label htmlFor="prod-stock" className="text-body-sm">Stock status</Label>
+   671→              <Select value={form.stockStatus} onValueChange={(v) => setForm((f) => ({ ...f, stockStatus: v }))}>
+   672→                <SelectTrigger id="prod-stock" className="h-9 w-full text-body-sm" aria-label="Stock status">
+   673→                  <SelectValue />
+   674→                </SelectTrigger>
+   675→                <SelectContent>
+   676→                  {STOCK_STATUSES.map((s) => (
+   677→                    <SelectItem key={s} value={s}>
+   678→                      {STOCK_STATUS_LABELS[s]}
+   679→                    </SelectItem>
+   680→                  ))}
+   681→                </SelectContent>
+   682→              </Select>
+   683→            </div>
+   684→
+   685→            <GroupLabel className="sm:col-span-2">Pricing</GroupLabel>
+   686→            <div className="space-y-1.5">
+   687→              <Label htmlFor="prod-price" className="text-body-sm">
+   688→                Default price <span className="text-muted-foreground">(blank = quote required)</span>
+   689→              </Label>
+   690→              <div className="relative">
+   691→                <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-body-sm text-muted-foreground" aria-hidden>$</span>
+   692→                <Input
+   693→                  id="prod-price"
+   694→                  inputMode="decimal"
+   695→                  value={form.defaultPrice}
+   696→                  onChange={set("defaultPrice")}
+   697→                  placeholder="0.42"
+   698→                  aria-invalid={priceInvalid || undefined}
+   699→                  className="tnum h-9 pl-6 text-body-sm"
+   700→                />
+   701→              </div>
+   702→              {priceInvalid ? <FieldError>Enter a valid amount, e.g. 0.42</FieldError> : null}
+   703→            </div>
+   704→            <div className="space-y-1.5">
+   705→              <Label htmlFor="prod-lead" className="text-body-sm">Lead time note <span className="text-muted-foreground">(optional)</span></Label>
+   706→              <Input id="prod-lead" value={form.leadTimeNote} onChange={set("leadTimeNote")} placeholder="2 weeks from artwork approval" className="h-9 text-body-sm" />
+   707→            </div>
+   708→          </div>
+   709→
+   710→          {submitError && <FieldError>{submitError}</FieldError>}
+   711→
+   712→          <DialogFooter className="border-t pt-4">
+   713→            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
+   714→            <Button type="submit" className="gap-1.5" disabled={save.isPending}>
+   715→              {save.isPending ? "Saving…" : isEdit ? "Save product" : "Create product"}
+   716→            </Button>
+   717→          </DialogFooter>
+   718→        </form>
+   719→      </DialogContent>
+   720→    </Dialog>
+   721→  );
+   722→}
+   723→

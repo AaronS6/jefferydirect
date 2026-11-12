@@ -1,0 +1,675 @@
+     1→"use client";
+     2→
+     3→// Quotation detail — your original request, the issued quote (items, total,
+     4→// expiry, terms), decision actions when issued, conversion when accepted,
+     5→// and a print-ready document preview.
+     6→
+     7→import { useState } from "react";
+     8→import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+     9→import { motion, useReducedMotion } from "framer-motion";
+    10→import { ArrowRight, BadgeCheck, Check, FileDown, FileText, Loader2, PencilLine, Printer, ThumbsDown, TriangleAlert } from "lucide-react";
+    11→import { Button } from "@/components/ui/button";
+    12→import {
+    13→  AlertDialog,
+    14→  AlertDialogAction,
+    15→  AlertDialogCancel,
+    16→  AlertDialogContent,
+    17→  AlertDialogDescription,
+    18→  AlertDialogFooter,
+    19→  AlertDialogHeader,
+    20→  AlertDialogTitle,
+    21→} from "@/components/ui/alert-dialog";
+    22→import {
+    23→  Dialog,
+    24→  DialogContent,
+    25→  DialogDescription,
+    26→  DialogFooter,
+    27→  DialogHeader,
+    28→  DialogTitle,
+    29→} from "@/components/ui/dialog";
+    30→import { Separator } from "@/components/ui/separator";
+    31→import { Skeleton } from "@/components/ui/skeleton";
+    32→import { Textarea } from "@/components/ui/textarea";
+    33→import { Label } from "@/components/ui/label";
+    34→import { PageHeader } from "@/components/shared/page-header";
+    35→import { Money } from "@/components/shared/money";
+    36→import { StatusBadge } from "@/components/shared/status-badge";
+    37→import { QuoteDocument } from "@/components/shared/quote-document";
+    38→import { api } from "@/lib/api-client";
+    39→import { useAppStore } from "@/store/app-store";
+    40→import type { QuotationDetail } from "@/types";
+    41→import { QUOTE_ITEM_KIND_LABELS } from "@/lib/constants";
+    42→import { formatDate } from "@/lib/date";
+    43→import { toast } from "@/hooks/use-toast";
+    44→import { DetailRow, ErrorAlert, Mono, RowsSkeleton, SectionCard } from "./portal-bits";
+    45→
+    46→const EASE = [0.22, 1, 0.36, 1] as const;
+    47→
+    48→// Short enquiry phrases for the admin-recorded provenance callout.
+    49→const SOURCE_ENQUIRY: Record<string, string> = {
+    50→  EMAIL: "email",
+    51→  PHONE: "phone",
+    52→  IN_PERSON: "in-person",
+    53→};
+    54→
+    55→type RespondAction = "ACCEPT" | "REJECT" | "REVISION";
+    56→
+    57→function daysUntil(iso: string): number {
+    58→  return Math.ceil((new Date(iso).getTime() - Date.now()) / 86_400_000);
+    59→}
+    60→
+    61→export function QuoteDetailView({ quotationId }: { quotationId: string }) {
+    62→  const back = useAppStore((s) => s.back);
+    63→  const navigate = useAppStore((s) => s.navigate);
+    64→  const queryClient = useQueryClient();
+    65→  const reduce = useReducedMotion();
+    66→  const enter = {
+    67→    initial: { opacity: 0, y: reduce ? 0 : 8 },
+    68→    animate: { opacity: 1, y: 0 },
+    69→    transition: { duration: 0.22, ease: EASE },
+    70→  };
+    71→
+    72→  const [acceptOpen, setAcceptOpen] = useState(false);
+    73→  const [declineOpen, setDeclineOpen] = useState(false);
+    74→  const [revisionOpen, setRevisionOpen] = useState(false);
+    75→  const [convertOpen, setConvertOpen] = useState(false);
+    76→  const [printOpen, setPrintOpen] = useState(false);
+    77→  const [declineReason, setDeclineReason] = useState("");
+    78→  const [revisionComment, setRevisionComment] = useState("");
+    79→  const [actionError, setActionError] = useState<string | null>(null);
+    80→
+    81→  const { data: quote, isLoading, error, refetch } = useQuery({
+    82→    queryKey: ["quotations", "detail", quotationId],
+    83→    queryFn: () => api.get<QuotationDetail>(`/api/customer/quotations/${quotationId}`),
+    84→  });
+    85→
+    86→  const invalidate = () => {
+    87→    queryClient.invalidateQueries({ queryKey: ["quotations"] });
+    88→    queryClient.invalidateQueries({ queryKey: ["customer-dashboard"] });
+    89→    queryClient.invalidateQueries({ queryKey: ["notifications"] });
+    90→  };
+    91→
+    92→  const respondMutation = useMutation({
+    93→    mutationFn: ({ action, comment }: { action: RespondAction; comment?: string }) =>
+    94→      api.post<{ ok: boolean }>(`/api/customer/quotations/${quotationId}/respond`, { action, comment }),
+    95→    onSuccess: (_res, vars) => {
+    96→      invalidate();
+    97→      setAcceptOpen(false);
+    98→      setDeclineOpen(false);
+    99→      setRevisionOpen(false);
+   100→      setDeclineReason("");
+   101→      setRevisionComment("");
+   102→      setActionError(null);
+   103→      if (vars.action === "ACCEPT") {
+   104→        toast({
+   105→          title: "Quotation accepted",
+   106→          description: "Thank you — you can now convert it into an order request when you're ready.",
+   107→        });
+   108→      } else if (vars.action === "REJECT") {
+   109→        toast({ title: "Quotation declined", description: "Our team has been notified of your decision." });
+   110→      } else {
+   111→        toast({
+   112→          title: "Revision requested",
+   113→          description: "Our team will review your comments and issue an updated quotation.",
+   114→        });
+   115→      }
+   116→    },
+   117→    onError: (err) => {
+   118→      const message =
+   119→        err instanceof Error ? err.message : "We could not record your response.";
+   120→      setActionError(message);
+   121→      setAcceptOpen(false);
+   122→      setDeclineOpen(false);
+   123→      setRevisionOpen(false);
+   124→      toast({ title: "We could not record your response.", description: message });
+   125→    },
+   126→  });
+   127→
+   128→  const convertMutation = useMutation({
+   129→    mutationFn: () =>
+   130→      api.post<{ orderId: string; orderNumber: string }>(`/api/customer/quotations/${quotationId}/convert`),
+   131→    onSuccess: (res) => {
+   132→      invalidate();
+   133→      queryClient.invalidateQueries({ queryKey: ["orders"] });
+   134→      setConvertOpen(false);
+   135→      toast({
+   136→        title: "Order request created from quotation",
+   137→        description: `${res.orderNumber} — our order desk will confirm availability and delivery.`,
+   138→      });
+   139→      navigate("order-detail", { id: res.orderId });
+   140→    },
+   141→    onError: (err) => {
+   142→      const message = err instanceof Error ? err.message : "We could not convert this quotation.";
+   143→      setActionError(message);
+   144→      setConvertOpen(false);
+   145→      toast({ title: "We could not convert this quotation.", description: message });
+   146→    },
+   147→  });
+   148→
+   149→  if (error) {
+   150→    return (
+   151→      <motion.div {...enter}>
+   152→        <PageHeader title="Quotation" eyebrow="Quotations" onBack={back} />
+   153→        <ErrorAlert
+   154→          message={error instanceof Error ? error.message : "We could not load this quotation."}
+   155→          onRetry={() => refetch()}
+   156→        />
+   157→        <div className="mt-4">
+   158→          <Button variant="outline" onClick={() => navigate("quotations")}>
+   159→            Back to quotations
+   160→          </Button>
+   161→        </div>
+   162→      </motion.div>
+   163→    );
+   164→  }
+   165→
+   166→  if (isLoading || !quote) {
+   167→    return (
+   168→      <motion.div {...enter}>
+   169→        <PageHeader title="Quotation" eyebrow="Quotations" onBack={back} />
+   170→        <div className="space-y-8">
+   171→          <div className="rounded-[14px] border bg-card p-5 shadow-xs">
+   172→            <RowsSkeleton rows={6} />
+   173→          </div>
+   174→          <div className="rounded-[14px] border bg-card p-5 shadow-xs">
+   175→            <Skeleton className="h-4 w-40" />
+   176→            <Skeleton className="mt-3 h-40 w-full" />
+   177→          </div>
+   178→        </div>
+   179→      </motion.div>
+   180→    );
+   181→  }
+   182→
+   183→  const issued = quote.items.length > 0 && quote.status !== "REQUESTED" && quote.status !== "UNDER_REVIEW";
+   184→  const expiringSoon =
+   185→    quote.status === "ISSUED" && quote.expiryDate !== null && daysUntil(quote.expiryDate) <= 7;
+   186→
+   187→  return (
+   188→    <motion.div {...enter}>
+   189→      <PageHeader
+   190→        title={<Mono className="text-heading tracking-tight">{quote.quoteNumber}</Mono>}
+   191→        eyebrow="Quotation"
+   192→        onBack={back}
+   193→        description={quote.title}
+   194→        actions={
+   195→          <>
+   196→            {quote.revision > 0 && (
+   197→              <span className="inline-flex h-[22px] shrink-0 items-center rounded-full border bg-card px-2.5 text-caption font-medium text-muted-foreground">
+   198→                Rev {quote.revision}
+   199→              </span>
+   200→            )}
+   201→            <StatusBadge status={quote.status} kind="quote" />
+   202→          </>
+   203→        }
+   204→      />
+   205→
+   206→      {quote.sourceType && quote.sourceType !== "PORTAL" && (
+   207→        <div className="mb-6 flex items-start gap-2.5 rounded-[10px] border border-kraft/40 bg-kraft-soft/60 px-4 py-3 text-body-sm text-kraft-ink">
+   208→          <FileText className="mt-0.5 size-4 shrink-0" aria-hidden />
+   209→          <p>
+   210→            <span className="font-medium">Jeffery Group issued this quotation for you</span> — from your{" "}
+   211→            {SOURCE_ENQUIRY[quote.sourceType] ?? quote.sourceType.toLowerCase()} enquiry
+   212→            {quote.recordedByName ? `, handled by ${quote.recordedByName}` : ""}. Review the details below and
+   213→            respond whenever you&apos;re ready.
+   214→          </p>
+   215→        </div>
+   216→      )}
+   217→
+   218→      {expiringSoon && (
+   219→        <div
+   220→          role="alert"
+   221→          className="mb-6 flex items-start gap-2.5 rounded-[10px] border border-kraft/40 bg-kraft-soft/60 px-4 py-3 text-body-sm text-kraft-ink"
+   222→        >
+   223→          <TriangleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />
+   224→          <p>
+   225→            <span className="font-medium">This quotation expires soon</span> — valid until{" "}
+   226→            {formatDate(quote.expiryDate)}. Accepted pricing applies only within the validity period.
+   227→          </p>
+   228→        </div>
+   229→      )}
+   230→
+   231→      <div className="grid grid-cols-1 gap-8 xl:grid-cols-[minmax(0,1fr)_360px]">
+   232→        {/* ── Issued quotation — paper document ── */}
+   233→        <div className="min-w-0 space-y-8">
+   234→          {issued ? (
+   235→            <div className="space-y-4">
+   236→              <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+   237→                <div>
+   238→                  <p className="text-micro text-muted-foreground">Issued quotation</p>
+   239→                  <p className="mt-1 text-caption text-muted-foreground">
+   240→                    Issued {formatDate(quote.issuedAt)}
+   241→                    {quote.expiryDate ? ` · valid until ${formatDate(quote.expiryDate)}` : ""} · excludes
+   242→                    applicable taxes
+   243→                  </p>
+   244→                </div>
+   245→                <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setPrintOpen(true)}>
+   246→                  <Printer className="size-3.5" aria-hidden />
+   247→                  Print / Save PDF
+   248→                </Button>
+   249→              </div>
+   250→
+   251→              {/* ── Paper document — the printed-paper metaphor ── */}
+   252→              <div className="rounded-[18px] bg-surface-sunken p-4 sm:p-6">
+   253→                <div className="mx-auto max-w-[760px] bg-white px-6 py-8 text-neutral-900 shadow-md sm:px-10 dark:bg-white dark:text-neutral-900">
+   254→                  {/* Document header */}
+   255→                  <div className="flex flex-wrap items-start justify-between gap-x-6 gap-y-4 border-b border-neutral-900/15 pb-6">
+   256→                    <div>
+   257→                      <p className="text-micro text-neutral-900/50">Quotation</p>
+   258→                      <p className="font-display mt-1 text-title font-normal tracking-tight">
+   259→                        {quote.quoteNumber}
+   260→                      </p>
+   261→                      {quote.revision > 0 && (
+   262→                        <p className="mt-1 text-caption text-neutral-900/60">Revision {quote.revision}</p>
+   263→                      )}
+   264→                    </div>
+   265→                    <div className="text-right">
+   266→                      <p className="text-micro text-neutral-900/50">Prepared for</p>
+   267→                      <p className="mt-1 text-body-sm font-semibold">{quote.orgName}</p>
+   268→                      <p className="mt-0.5 text-caption text-neutral-900/60">Attn: {quote.requestedBy}</p>
+   269→                      <p className="mt-0.5 text-caption text-neutral-900/60">
+   270→                        {quote.destination ?? quote.title}
+   271→                      </p>
+   272→                    </div>
+   273→                  </div>
+   274→
+   275→                  {/* Items — ruled hairline rows */}
+   276→                  <div className="mt-5 hidden md:block">
+   277→                    <table className="w-full border-collapse text-body-sm">
+   278→                      <thead>
+   279→                        <tr className="border-b border-neutral-900/25 text-micro text-neutral-900/60">
+   280→                          <th className="w-[46%] py-2 text-left font-medium">Description</th>
+   281→                          <th className="py-2 text-left font-medium">Type</th>
+   282→                          <th className="py-2 pl-5 text-right font-medium">Qty</th>
+   283→                          <th className="py-2 pl-5 whitespace-nowrap text-right font-medium">Unit</th>
+   284→                          <th className="py-2 pl-5 whitespace-nowrap text-right font-medium">Amount</th>
+   285→                        </tr>
+   286→                      </thead>
+   287→                      <tbody>
+   288→                        {quote.items.map((item) => (
+   289→                          <tr key={item.id} className="border-b border-neutral-900/15 align-top last:border-b-0">
+   290→                            <td className="py-2.5 pr-2">{item.description}</td>
+   291→                            <td className="py-2.5 pr-2 text-neutral-900/60">
+   292→                              {QUOTE_ITEM_KIND_LABELS[item.kind] ?? item.kind}
+   293→                            </td>
+   294→                            <td className="tnum py-2.5 pl-5 whitespace-nowrap text-right">{item.qty.toLocaleString()}</td>
+   295→                            <td className="tnum py-2.5 pl-5 whitespace-nowrap text-right">
+   296→                              <Money cents={item.unitPriceCents} />
+   297→                            </td>
+   298→                            <td className="tnum py-2.5 pl-5 whitespace-nowrap text-right">
+   299→                              <Money cents={item.lineTotalCents} className="font-medium" />
+   300→                            </td>
+   301→                          </tr>
+   302→                        ))}
+   303→                      </tbody>
+   304→                    </table>
+   305→                  </div>
+   306→                  {/* Mobile stacked */}
+   307→                  <ul className="mt-5 md:hidden">
+   308→                    {quote.items.map((item) => (
+   309→                      <li
+   310→                        key={item.id}
+   311→                        className="flex items-start justify-between gap-3 border-b border-neutral-900/15 py-3 last:border-b-0"
+   312→                      >
+   313→                        <div className="min-w-0">
+   314→                          <p className="text-body-sm leading-snug">{item.description}</p>
+   315→                          <p className="mt-0.5 text-caption text-neutral-900/60">
+   316→                            {QUOTE_ITEM_KIND_LABELS[item.kind] ?? item.kind}
+   317→                          </p>
+   318→                        </div>
+   319→                        <div className="shrink-0 text-right">
+   320→                          <Money cents={item.lineTotalCents} className="text-body-sm font-medium" />
+   321→                          <p className="text-caption text-neutral-900/60">
+   322→                            <span className="tnum">{item.qty.toLocaleString()}</span> ×{" "}
+   323→                            <Money cents={item.unitPriceCents} />
+   324→                          </p>
+   325→                        </div>
+   326→                      </li>
+   327→                    ))}
+   328→                  </ul>
+   329→
+   330→                  {/* Totals block */}
+   331→                  <div className="mt-4 flex justify-end">
+   332→                    <div className="w-full max-w-[300px]">
+   333→                      <div className="flex items-baseline justify-between py-1 text-body-sm text-neutral-900/70">
+   334→                        <span>Subtotal</span>
+   335→                        <Money cents={quote.itemsTotalCents} />
+   336→                      </div>
+   337→                      <div className="flex items-baseline justify-between py-1 text-body-sm text-neutral-900/70">
+   338→                        <span>Taxes</span>
+   339→                        <span className="text-caption">As applicable at invoice</span>
+   340→                      </div>
+   341→                      <div className="mt-1 flex items-baseline justify-between border-t border-neutral-900/25 pt-2">
+   342→                        <span className="text-body-sm font-medium">Quotation total</span>
+   343→                        <span className="tnum font-display text-title font-normal">
+   344→                          <Money cents={quote.itemsTotalCents} />{" "}
+   345→                          <span className="text-caption font-normal text-neutral-900/60">CAD</span>
+   346→                        </span>
+   347→                      </div>
+   348→                    </div>
+   349→                  </div>
+   350→
+   351→                  {quote.terms && (
+   352→                    <div className="mt-6 border-t border-neutral-900/15 pt-5">
+   353→                      <p className="text-micro text-neutral-900/50">Terms &amp; conditions</p>
+   354→                      <p className="mt-2 whitespace-pre-line text-body-sm leading-relaxed text-neutral-900/70">
+   355→                        {quote.terms}
+   356→                      </p>
+   357→                    </div>
+   358→                  )}
+   359→                </div>
+   360→
+   361→                {/* Action bar pinned beneath the sheet */}
+   362→                {quote.status === "ISSUED" && (
+   363→                  <div className="mx-auto mt-4 max-w-[760px]">
+   364→                    {actionError && (
+   365→                      <div
+   366→                        role="alert"
+   367→                        className="mb-3 rounded-[10px] bg-[var(--status-danger-bg)] px-3.5 py-2.5 text-body-sm text-[var(--status-danger-fg)]"
+   368→                      >
+   369→                        {actionError}
+   370→                      </div>
+   371→                    )}
+   372→                    <div className="flex flex-wrap items-center gap-2.5">
+   373→                      <Button className="gap-2" onClick={() => setAcceptOpen(true)} disabled={respondMutation.isPending}>
+   374→                        <Check className="size-4" aria-hidden />
+   375→                        Accept quotation
+   376→                      </Button>
+   377→                      <Button
+   378→                        variant="outline"
+   379→                        className="gap-2"
+   380→                        onClick={() => setRevisionOpen(true)}
+   381→                        disabled={respondMutation.isPending}
+   382→                      >
+   383→                        <PencilLine className="size-4" aria-hidden />
+   384→                        Request revision
+   385→                      </Button>
+   386→                      <Button
+   387→                        variant="destructive"
+   388→                        className="gap-2"
+   389→                        onClick={() => setDeclineOpen(true)}
+   390→                        disabled={respondMutation.isPending}
+   391→                      >
+   392→                        <ThumbsDown className="size-4" aria-hidden />
+   393→                        Decline
+   394→                      </Button>
+   395→                    </div>
+   396→                    <p className="mt-2 text-caption text-pretty text-muted-foreground">
+   397→                      Accepting records your intent — you can convert to an order request afterwards.
+   398→                    </p>
+   399→                  </div>
+   400→                )}
+   401→              </div>
+   402→            </div>
+   403→          ) : (
+   404→            <SectionCard title="Issued quotation">
+   405→              {quote.status === "REQUESTED" || quote.status === "UNDER_REVIEW" ? (
+   406→                <div className="flex items-start gap-2.5 text-body-sm text-muted-foreground">
+   407→                  <BadgeCheck className="mt-0.5 size-4 shrink-0" aria-hidden />
+   408→                  <p>
+   409→                    Not issued yet — our estimating team is preparing your quotation. You&apos;ll receive a
+   410→                    notification as soon as it&apos;s ready for review.
+   411→                  </p>
+   412→                </div>
+   413→              ) : (
+   414→                <div className="flex items-start gap-2.5 text-body-sm text-muted-foreground">
+   415→                  <BadgeCheck className="mt-0.5 size-4 shrink-0" aria-hidden />
+   416→                  <p>No priced items on this quotation.</p>
+   417→                </div>
+   418→              )}
+   419→            </SectionCard>
+   420→          )}
+   421→
+   422→          {quote.status === "ACCEPTED" && (
+   423→            <SectionCard title="Next step" description="You accepted this quotation — turn it into an order request.">
+   424→              {actionError && (
+   425→                <div
+   426→                  role="alert"
+   427→                  className="mb-3 rounded-[10px] bg-[var(--status-danger-bg)] px-3.5 py-2.5 text-body-sm text-[var(--status-danger-fg)]"
+   428→                >
+   429→                  {actionError}
+   430→                </div>
+   431→              )}
+   432→              <div className="flex flex-wrap items-center gap-3">
+   433→                <Button className="gap-2" onClick={() => setConvertOpen(true)} disabled={convertMutation.isPending}>
+   434→                  {convertMutation.isPending ? (
+   435→                    <Loader2 className="size-4 animate-spin" aria-hidden />
+   436→                  ) : (
+   437→                    <ArrowRight className="size-4" aria-hidden />
+   438→                  )}
+   439→                  Convert to order request
+   440→                </Button>
+   441→                <Button variant="outline" className="gap-2" onClick={() => setPrintOpen(true)}>
+   442→                  <Printer className="size-4" aria-hidden />
+   443→                  Print / Save PDF
+   444→                </Button>
+   445→              </div>
+   446→              <p className="mt-3 text-caption text-pretty leading-relaxed text-muted-foreground">
+   447→                Converting creates a submitted order request at the quoted prices — setup, freight and other
+   448→                charges carry across as separate lines. Our order desk then confirms availability and the
+   449→                delivery date.
+   450→              </p>
+   451→            </SectionCard>
+   452→          )}
+   453→
+   454→          {(quote.status === "EXPIRED" || quote.status === "REJECTED" || quote.status === "REVISED" || quote.status === "CANCELLED") && (
+   455→            <div className="rounded-[14px] border bg-card px-5 py-4 text-body-sm leading-relaxed text-muted-foreground shadow-xs">
+   456→              {quote.status === "EXPIRED" &&
+   457→                `This quotation expired on ${formatDate(quote.expiryDate)}. Pricing is no longer guaranteed — contact our team or request a new quotation for refreshed pricing.`}
+   458→              {quote.status === "REJECTED" &&
+   459→                `You declined this quotation${quote.respondedAt ? ` on ${formatDate(quote.respondedAt)}` : ""}. Thank you for letting us know — we're happy to quote again whenever you're ready.`}
+   460→              {quote.status === "REVISED" &&
+   461→                "A revision was recorded on this quotation. Our team will issue an updated version, and you'll be notified when it's ready."}
+   462→              {quote.status === "CANCELLED" && "This quotation was cancelled."}
+   463→            </div>
+   464→          )}
+   465→        </div>
+   466→
+   467→        {/* ── Your request rail ── */}
+   468→        <aside className="min-w-0" aria-label="Original quotation request">
+   469→          <SectionCard
+   470→            title="Your request"
+   471→            description={
+   472→              quote.sourceType && quote.sourceType !== "PORTAL"
+   473→                ? "Recorded by the Jeffery Group team on your behalf"
+   474→                : `Submitted by ${quote.requestedBy}`
+   475→            }
+   476→          >
+   477→            <dl className="m-0">
+   478→              <DetailRow label="Request title">{quote.title}</DetailRow>
+   479→              <DetailRow label="Category">{quote.category}</DetailRow>
+   480→              <DetailRow label="Product">{quote.productName}</DetailRow>
+   481→              <DetailRow label="Dimensions">{quote.dimensions}</DetailRow>
+   482→              <DetailRow label="Material">{quote.material}</DetailRow>
+   483→              <DetailRow label="Colour">{quote.colour}</DetailRow>
+   484→              <DetailRow label="Printing">{quote.printing}</DetailRow>
+   485→              <DetailRow label="Quantity">{quote.quantity}</DetailRow>
+   486→              <DetailRow label="Needed by">{quote.neededBy}</DetailRow>
+   487→              <DetailRow label="Destination">{quote.destination}</DetailRow>
+   488→              <DetailRow label="Specs">{quote.specs}</DetailRow>
+   489→              <DetailRow label="Comments">{quote.comments}</DetailRow>
+   490→            </dl>
+   491→            <Separator className="my-4" />
+   492→            <dl className="m-0">
+   493→              <DetailRow label="Requested">{formatDate(quote.createdAt)}</DetailRow>
+   494→              {quote.respondedAt && (
+   495→                <DetailRow label="Your response">
+   496→                  {formatDate(quote.respondedAt)}
+   497→                  {quote.respondedNote && (
+   498→                    <span className="block whitespace-pre-line text-caption text-muted-foreground">
+   499→                      {quote.respondedNote}
+   500→                    </span>
+   501→                  )}
+   502→                </DetailRow>
+   503→              )}
+   504→            </dl>
+   505→          </SectionCard>
+   506→        </aside>
+   507→      </div>
+   508→
+   509→      {/* Accept confirm */}
+   510→      <AlertDialog open={acceptOpen} onOpenChange={setAcceptOpen}>
+   511→        <AlertDialogContent>
+   512→          <AlertDialogHeader>
+   513→            <AlertDialogTitle>Accept quotation {quote.quoteNumber}?</AlertDialogTitle>
+   514→            <AlertDialogDescription>
+   515→              Accepting records your decision with our team. The quoted prices become the basis for your
+   516→              order request, valid until {formatDate(quote.expiryDate)}.
+   517→            </AlertDialogDescription>
+   518→          </AlertDialogHeader>
+   519→          <AlertDialogFooter>
+   520→            <AlertDialogCancel disabled={respondMutation.isPending}>Not now</AlertDialogCancel>
+   521→            <AlertDialogAction
+   522→              disabled={respondMutation.isPending}
+   523→              onClick={() => respondMutation.mutate({ action: "ACCEPT" })}
+   524→            >
+   525→              Accept
+   526→            </AlertDialogAction>
+   527→          </AlertDialogFooter>
+   528→        </AlertDialogContent>
+   529→      </AlertDialog>
+   530→
+   531→      {/* Decline confirm + optional reason */}
+   532→      <AlertDialog open={declineOpen} onOpenChange={setDeclineOpen}>
+   533→        <AlertDialogContent>
+   534→          <AlertDialogHeader>
+   535→            <AlertDialogTitle>Decline quotation {quote.quoteNumber}?</AlertDialogTitle>
+   536→            <AlertDialogDescription asChild>
+   537→              <div className="space-y-3">
+   538→                <p>
+   539→                  Letting us know helps the team close the request. An optional reason is shared with our
+   540→                  estimating team to improve future quotes.
+   541→                </p>
+   542→                <div className="space-y-2">
+   543→                  <Label htmlFor="decline-reason">Reason (optional)</Label>
+   544→                  <Textarea
+   545→                    id="decline-reason"
+   546→                    rows={3}
+   547→                    maxLength={2000}
+   548→                    placeholder="e.g. Timing no longer works for us"
+   549→                    value={declineReason}
+   550→                    onChange={(e) => setDeclineReason(e.target.value)}
+   551→                  />
+   552→                </div>
+   553→              </div>
+   554→            </AlertDialogDescription>
+   555→          </AlertDialogHeader>
+   556→          <AlertDialogFooter>
+   557→            <AlertDialogCancel disabled={respondMutation.isPending}>Keep quotation</AlertDialogCancel>
+   558→            <AlertDialogAction
+   559→              className="bg-destructive text-white hover:bg-destructive/90 focus-visible:ring-destructive/35"
+   560→              disabled={respondMutation.isPending}
+   561→              onClick={() => respondMutation.mutate({ action: "REJECT", comment: declineReason.trim() || undefined })}
+   562→            >
+   563→              Decline quotation
+   564→            </AlertDialogAction>
+   565→          </AlertDialogFooter>
+   566→        </AlertDialogContent>
+   567→      </AlertDialog>
+   568→
+   569→      {/* Request revision */}
+   570→      <Dialog open={revisionOpen} onOpenChange={setRevisionOpen}>
+   571→        <DialogContent className="sm:max-w-[480px]">
+   572→          <DialogHeader>
+   573→            <DialogTitle>Request a revision</DialogTitle>
+   574→            <DialogDescription>
+   575→              Tell our estimating team what to change — quantity, material, delivery, terms. We&apos;ll issue
+   576→              an updated quotation.
+   577→            </DialogDescription>
+   578→          </DialogHeader>
+   579→          <div className="space-y-2">
+   580→            <Label htmlFor="revision-comment">What should change?</Label>
+   581→            <Textarea
+   582→              id="revision-comment"
+   583→              rows={4}
+   584→              maxLength={2000}
+   585→              placeholder="e.g. Can we look at 3,000 units instead, with freight to the Danforth location?"
+   586→              value={revisionComment}
+   587→              onChange={(e) => setRevisionComment(e.target.value)}
+   588→            />
+   589→          </div>
+   590→          {actionError && (
+   591→            <div
+   592→              role="alert"
+   593→              className="rounded-[10px] bg-[var(--status-danger-bg)] px-3.5 py-2.5 text-body-sm text-[var(--status-danger-fg)]"
+   594→            >
+   595→              {actionError}
+   596→            </div>
+   597→          )}
+   598→          <DialogFooter className="gap-2">
+   599→            <Button variant="outline" onClick={() => setRevisionOpen(false)} disabled={respondMutation.isPending}>
+   600→              Cancel
+   601→            </Button>
+   602→            <Button
+   603→              disabled={respondMutation.isPending || revisionComment.trim().length === 0}
+   604→              onClick={() => respondMutation.mutate({ action: "REVISION", comment: revisionComment.trim() })}
+   605→            >
+   606→              {respondMutation.isPending ? (
+   607→                <Loader2 className="size-4 animate-spin" aria-hidden />
+   608→              ) : (
+   609→                <PencilLine className="size-4" aria-hidden />
+   610→              )}
+   611→              Send revision request
+   612→            </Button>
+   613→          </DialogFooter>
+   614→        </DialogContent>
+   615→      </Dialog>
+   616→
+   617→      {/* Convert confirm */}
+   618→      <AlertDialog open={convertOpen} onOpenChange={setConvertOpen}>
+   619→        <AlertDialogContent>
+   620→          <AlertDialogHeader>
+   621→            <AlertDialogTitle>Convert {quote.quoteNumber} to an order request?</AlertDialogTitle>
+   622→            <AlertDialogDescription>
+   623→              We&apos;ll create a submitted order request at the quoted prices — product lines carry across
+   624→              with their quoted rates, and setup, freight and other charges appear as separate lines. Our
+   625→              order desk then confirms availability and delivery before anything is produced.
+   626→            </AlertDialogDescription>
+   627→          </AlertDialogHeader>
+   628→          {actionError && (
+   629→            <div
+   630→              role="alert"
+   631→              className="rounded-[10px] bg-[var(--status-danger-bg)] px-3.5 py-2.5 text-body-sm text-[var(--status-danger-fg)]"
+   632→            >
+   633→              {actionError}
+   634→            </div>
+   635→          )}
+   636→          <AlertDialogFooter>
+   637→            <AlertDialogCancel disabled={convertMutation.isPending}>Not yet</AlertDialogCancel>
+   638→            <AlertDialogAction
+   639→              disabled={convertMutation.isPending}
+   640→              onClick={() => convertMutation.mutate()}
+   641→            >
+   642→              <ArrowRight className="size-4" aria-hidden />
+   643→              Create order request
+   644→            </AlertDialogAction>
+   645→          </AlertDialogFooter>
+   646→        </AlertDialogContent>
+   647→      </AlertDialog>
+   648→
+   649→      {/* Print / save as PDF */}
+   650→      <Dialog open={printOpen} onOpenChange={setPrintOpen}>
+   651→        <DialogContent className="max-h-[92vh] max-w-3xl overflow-y-auto bg-background p-0">
+   652→          <DialogHeader className="border-b px-5 py-4">
+   653→            <DialogTitle>Quotation preview</DialogTitle>
+   654→            <DialogDescription>
+   655→              Use your browser&apos;s print dialog to print or save this quotation as a PDF.
+   656→            </DialogDescription>
+   657→          </DialogHeader>
+   658→          <div className="bg-surface-sunken p-4 sm:p-6">
+   659→            <QuoteDocument quote={quote} />
+   660→          </div>
+   661→          <div className="flex justify-end gap-2 border-t bg-background px-5 py-3.5">
+   662→            <Button variant="outline" onClick={() => setPrintOpen(false)}>
+   663→              Close
+   664→            </Button>
+   665→            <Button className="gap-2" onClick={() => window.print()}>
+   666→              <FileDown className="size-4" aria-hidden />
+   667→              Print / Save PDF
+   668→            </Button>
+   669→          </div>
+   670→        </DialogContent>
+   671→      </Dialog>
+   672→    </motion.div>
+   673→  );
+   674→}
+   675→

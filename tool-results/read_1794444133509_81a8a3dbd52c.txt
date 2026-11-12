@@ -1,0 +1,1401 @@
+     1→"use client";
+     2→
+     3→// Administration — order detail, upgraded for the Update Centre: the fulfilment
+     4→// workflow control (status/tracking/ETA) is preserved, alongside the customer
+     5→// update timeline with drafts, change-request review, internal notes and the
+     6→// explicit milestone-date editor.
+     7→
+     8→import { useState } from "react";
+     9→import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+    10→import {
+    11→  ArrowLeftRight,
+    12→  BellRing,
+    13→  Building2,
+    14→  CalendarDays,
+    15→  CalendarClock,
+    16→  CheckCircle2,
+    17→  Ban,
+    18→  FileText,
+    19→  Info,
+    20→  Lock,
+    21→  MapPin,
+    22→  MessageSquareText,
+    23→  PackageCheck,
+    24→  Paperclip,
+    25→  PencilLine,
+    26→  Receipt,
+    27→  Send,
+    28→  StickyNote,
+    29→  Trash2,
+    30→  Truck,
+    31→} from "lucide-react";
+    32→import { Button } from "@/components/ui/button";
+    33→import { Input } from "@/components/ui/input";
+    34→import { Label } from "@/components/ui/label";
+    35→import { Textarea } from "@/components/ui/textarea";
+    36→import {
+    37→  Select,
+    38→  SelectContent,
+    39→  SelectGroup,
+    40→  SelectItem,
+    41→  SelectLabel,
+    42→  SelectTrigger,
+    43→  SelectValue,
+    44→} from "@/components/ui/select";
+    45→import {
+    46→  AlertDialog,
+    47→  AlertDialogAction,
+    48→  AlertDialogCancel,
+    49→  AlertDialogContent,
+    50→  AlertDialogDescription,
+    51→  AlertDialogFooter,
+    52→  AlertDialogHeader,
+    53→  AlertDialogTitle,
+    54→} from "@/components/ui/alert-dialog";
+    55→import {
+    56→  Dialog,
+    57→  DialogContent,
+    58→  DialogDescription,
+    59→  DialogFooter,
+    60→  DialogHeader,
+    61→  DialogTitle,
+    62→} from "@/components/ui/dialog";
+    63→import { Table, TableBody, TableFooter, TableHeader, TableRow } from "@/components/ui/table";
+    64→import { PageHeader } from "@/components/shared/page-header";
+    65→import { ChangeStatusBadge, DocumentCategoryBadge, OrderSourceBadge, StatusBadge } from "@/components/shared/status-badge";
+    66→import { Money, MoneyWithCode } from "@/components/shared/money";
+    67→import { OrderTimeline } from "@/components/shared/order-timeline";
+    68→import { UpdateTimeline } from "@/components/shared/update-timeline";
+    69→import { api } from "@/lib/api-client";
+    70→import { formatDate, formatDateTime, timeAgo } from "@/lib/date";
+    71→import {
+    72→  ORDER_SOURCE_LABELS,
+    73→  ORDER_STATUSES,
+    74→  ORDER_STATUS_LABELS,
+    75→  ORDER_TERMINAL_STATUSES,
+    76→} from "@/lib/constants";
+    77→import { useAppStore } from "@/store/app-store";
+    78→import { toast } from "@/hooks/use-toast";
+    79→import type { ChangeItem, ChangeRequestDto, LineSpecs, OrderDetail, OrderUpdateDto } from "@/types";
+    80→import { DefRow, FieldError, GroupLabel, InlineError, RowsSkeleton, SectionCard, Td, Th, ViewEnter, dashed } from "./admin-ui";
+    81→import { PublishUpdateDialog } from "./publish-update-dialog";
+    82→
+    83→function nextStatusAfter(status: string): string | undefined {
+    84→  const i = ORDER_STATUSES.indexOf(status as (typeof ORDER_STATUSES)[number]);
+    85→  if (i === -1 || i === ORDER_STATUSES.length - 1) return undefined;
+    86→  return ORDER_STATUSES[i + 1];
+    87→}
+    88→
+    89→/** Date-ish ISO → yyyy-mm-dd for <input type="date"> controls. */
+    90→function toDateInput(iso: string | null | undefined): string {
+    91→  if (!iso) return "";
+    92→  const m = /^\d{4}-\d{2}-\d{2}/.exec(iso);
+    93→  return m ? m[0] : "";
+    94→}
+    95→
+    96→/** One human-readable sentence for a single requested change. */
+    97→function describeChange(item: ChangeItem): string {
+    98→  switch (item.kind) {
+    99→    case "QUANTITY": {
+   100→      const label = item.name ?? item.sku ?? "product";
+   101→      return `Quantity, ${label}: ${(item.currentQty ?? 0).toLocaleString()} → ${(item.newQty ?? 0).toLocaleString()}`;
+   102→    }
+   103→    case "SPEC": {
+   104→      const label = item.name ?? item.sku;
+   105→      return `Specification, ${label ? `${label}: ` : ""}${item.spec ?? "—"}`;
+   106→    }
+   107→    case "ADD":
+   108→      return `Add ${item.name ?? "product"}${item.newQty ? ` × ${item.newQty.toLocaleString()}` : ""}`;
+   109→    case "REMOVE":
+   110→      return `Remove ${item.name ?? item.sku ?? "product"}`;
+   111→    case "ADDRESS":
+   112→      return `Delivery address: ${item.newAddress ?? "—"}`;
+   113→    case "DATE":
+   114→      return `Delivery date → ${item.newDate ? formatDate(item.newDate) : "—"}`;
+   115→    case "CANCEL":
+   116→      return "Cancel order";
+   117→    case "OTHER":
+   118→      return `Other: ${item.note ?? "—"}`;
+   119→  }
+   120→}
+   121→
+   122→const SPEC_LABELS: Partial<Record<keyof LineSpecs, string>> = {
+   123→  dimensions: "Dimensions",
+   124→  length: "Length",
+   125→  width: "Width",
+   126→  height: "Height",
+   127→  material: "Material",
+   128→  thickness: "Thickness",
+   129→  printing: "Printing",
+   130→  colour: "Colour",
+   131→  qtyPerCase: "Qty per case",
+   132→};
+   133→
+   134→function SpecChips({ specs }: { specs: LineSpecs }) {
+   135→  const entries = (Object.entries(specs) as [keyof LineSpecs, string | undefined][])
+   136→    .filter(([, v]) => v && v.trim())
+   137→    .slice(0, 8);
+   138→  if (entries.length === 0) return null;
+   139→  return (
+   140→    <ul className="mt-1.5 flex flex-wrap gap-1.5">
+   141→      {entries.map(([key, value]) => (
+   142→        <li
+   143→          key={key}
+   144→          className="inline-flex max-w-full items-center rounded-full border bg-card px-2 text-caption text-muted-foreground"
+   145→          title={value}
+   146→        >
+   147→          {key === "custom" ? (
+   148→            <span className="truncate">{value}</span>
+   149→          ) : (
+   150→            <span className="truncate">
+   151→              {SPEC_LABELS[key] ?? key}: {value}
+   152→            </span>
+   153→          )}
+   154→        </li>
+   155→      ))}
+   156→    </ul>
+   157→  );
+   158→}
+   159→
+   160→function ItemAttachmentChips({ attachments }: { attachments: { name: string; sizeLabel: string }[] }) {
+   161→  if (attachments.length === 0) return null;
+   162→  return (
+   163→    <ul className="mt-1.5 flex flex-wrap gap-1.5">
+   164→      {attachments.map((a, i) => (
+   165→        <li
+   166→          key={`${a.name}-${i}`}
+   167→          className="inline-flex max-w-full items-center gap-1.5 truncate rounded-full border bg-card px-2 text-caption text-muted-foreground"
+   168→          title={`${a.name} (${a.sizeLabel})`}
+   169→        >
+   170→          <Paperclip className="size-3 shrink-0" aria-hidden />
+   171→          <span className="truncate">{a.name}</span>
+   172→        </li>
+   173→      ))}
+   174→    </ul>
+   175→  );
+   176→}
+   177→
+   178→type MilestoneForm = {
+   179→  requestedDeliveryDate: string;
+   180→  estimatedDispatch: string;
+   181→  estimatedDelivery: string;
+   182→  revisedDeliveryDate: string;
+   183→  actualDeliveryDate: string;
+   184→  nextUpdateDate: string;
+   185→  trackingNumber: string;
+   186→};
+   187→
+   188→function initMilestones(order: OrderDetail): MilestoneForm {
+   189→  return {
+   190→    requestedDeliveryDate: toDateInput(order.requestedDeliveryDate),
+   191→    estimatedDispatch: toDateInput(order.estimatedDispatch),
+   192→    estimatedDelivery: toDateInput(order.estimatedDelivery),
+   193→    revisedDeliveryDate: toDateInput(order.revisedDeliveryDate),
+   194→    actualDeliveryDate: toDateInput(order.actualDeliveryDate),
+   195→    nextUpdateDate: toDateInput(order.nextUpdateDate),
+   196→    trackingNumber: order.trackingNumber ?? "",
+   197→  };
+   198→}
+   199→
+   200→const EMPTY_MILESTONES: MilestoneForm = {
+   201→  requestedDeliveryDate: "",
+   202→  estimatedDispatch: "",
+   203→  estimatedDelivery: "",
+   204→  revisedDeliveryDate: "",
+   205→  actualDeliveryDate: "",
+   206→  nextUpdateDate: "",
+   207→  trackingNumber: "",
+   208→};
+   209→
+   210→export function AdminOrderDetailView({ orderId }: { orderId: string }) {
+   211→  const back = useAppStore((s) => s.back);
+   212→  const navigate = useAppStore((s) => s.navigate);
+   213→  const queryClient = useQueryClient();
+   214→
+   215→  const { data: order, isLoading, isError, error } = useQuery({
+   216→    queryKey: ["admin", "order", orderId],
+   217→    queryFn: () => api.get<OrderDetail>(`/api/admin/orders/${orderId}`),
+   218→  });
+   219→
+   220→  function invalidateOrderScope() {
+   221→    queryClient.invalidateQueries({ queryKey: ["admin", "order", orderId] });
+   222→    queryClient.invalidateQueries({ queryKey: ["admin", "orders"] });
+   223→    queryClient.invalidateQueries({ queryKey: ["admin", "attention"] });
+   224→    queryClient.invalidateQueries({ queryKey: ["notifications"] });
+   225→  }
+   226→
+   227→  // ─── Workflow control state (preserved from the original control card) ────
+   228→  const [newStatus, setNewStatus] = useState<string>("");
+   229→  const [note, setNote] = useState("");
+   230→  const [tracking, setTracking] = useState("");
+   231→  const [estimatedDelivery, setEstimatedDelivery] = useState("");
+   232→  const [confirmDestructive, setConfirmDestructive] = useState(false);
+   233→
+   234→  const statusMutation = useMutation({
+   235→    mutationFn: (payload: { status: string; note?: string; trackingNumber?: string; estimatedDelivery?: string }) =>
+   236→      api.post<{ ok: boolean }>(`/api/admin/orders/${orderId}/status`, payload),
+   237→    onSuccess: (_res, payload) => {
+   238→      queryClient.invalidateQueries({ queryKey: ["admin", "order", orderId] });
+   239→      queryClient.invalidateQueries({ queryKey: ["admin", "orders"] });
+   240→      queryClient.invalidateQueries({ queryKey: ["admin", "overview"] });
+   241→      queryClient.invalidateQueries({ queryKey: ["notifications"] });
+   242→      toast({ title: `Status updated, ${ORDER_STATUS_LABELS[payload.status] ?? payload.status}` });
+   243→      setNewStatus("");
+   244→      setNote("");
+   245→    },
+   246→    onError: (err: Error) => toast({ title: "Could not update status", description: err.message }),
+   247→  });
+   248→
+   249→  // ─── Update Centre state ───────────────────────────────────────────────────
+   250→  const [publishOpen, setPublishOpen] = useState(false);
+   251→  const [editingDraft, setEditingDraft] = useState<OrderUpdateDto | null>(null);
+   252→  const [deletingDraft, setDeletingDraft] = useState<OrderUpdateDto | null>(null);
+   253→  const [noteDialogOpen, setNoteDialogOpen] = useState(false);
+   254→
+   255→  function openPublish(draft?: OrderUpdateDto) {
+   256→    setEditingDraft(draft ?? null);
+   257→    setPublishOpen(true);
+   258→  }
+   259→
+   260→  const deleteDraft = useMutation({
+   261→    mutationFn: (draftId: string) => api.del<{ ok: boolean }>(`/api/admin/orders/${orderId}/updates/${draftId}`),
+   262→    onSuccess: () => {
+   263→      invalidateOrderScope();
+   264→      setDeletingDraft(null);
+   265→      toast({ title: "Draft deleted" });
+   266→    },
+   267→    onError: (err: Error) => toast({ title: "Could not delete draft", description: err.message }),
+   268→  });
+   269→
+   270→  // ─── Milestone dates state (re-synced when the order reloads) ─────────────
+   271→  const [milestones, setMilestones] = useState<MilestoneForm>(() =>
+   272→    order ? initMilestones(order) : EMPTY_MILESTONES,
+   273→  );
+   274→  const [milestoneKey, setMilestoneKey] = useState<string>("");
+   275→  const [milestoneError, setMilestoneError] = useState<string | null>(null);
+   276→
+   277→  const saveMilestones = useMutation({
+   278→    mutationFn: () =>
+   279→      api.patch<{ ok: boolean }>(`/api/admin/orders/${orderId}/fields`, {
+   280→        requestedDeliveryDate: milestones.requestedDeliveryDate || null,
+   281→        estimatedDispatch: milestones.estimatedDispatch || null,
+   282→        estimatedDelivery: milestones.estimatedDelivery || null,
+   283→        revisedDeliveryDate: milestones.revisedDeliveryDate || null,
+   284→        actualDeliveryDate: milestones.actualDeliveryDate || null,
+   285→        nextUpdateDate: milestones.nextUpdateDate || null,
+   286→        trackingNumber: milestones.trackingNumber.trim() || null,
+   287→      }),
+   288→    onSuccess: () => {
+   289→      invalidateOrderScope();
+   290→      toast({ title: "Milestone dates saved" });
+   291→    },
+   292→    onError: (err: Error) => toast({ title: "Could not save dates", description: err.message }),
+   293→  });
+   294→
+   295→  // ─── Internal notes ────────────────────────────────────────────────────────
+   296→  const [noteBody, setNoteBody] = useState("");
+   297→  const addNote = useMutation({
+   298→    mutationFn: (body: string) => api.post<{ ok: boolean }>(`/api/admin/orders/${orderId}/internal-notes`, { body }),
+   299→    onSuccess: () => {
+   300→      invalidateOrderScope();
+   301→      setNoteBody("");
+   302→      setNoteDialogOpen(false);
+   303→      toast({ title: "Internal note added" });
+   304→    },
+   305→    onError: (err: Error) => toast({ title: "Could not add note", description: err.message }),
+   306→  });
+   307→
+   308→  if (isError) {
+   309→    return (
+   310→      <div>
+   311→        <PageHeader title="Order" onBack={back} />
+   312→        <InlineError message={error instanceof Error ? error.message : "Could not load this order."} />
+   313→      </div>
+   314→    );
+   315→  }
+   316→
+   317→  if (isLoading || !order) {
+   318→    return (
+   319→      <div>
+   320→        <PageHeader title="Order" onBack={back} />
+   321→        <div className="grid gap-4 sm:gap-6 lg:grid-cols-[1fr_360px]">
+   322→          <SectionCard>
+   323→            <RowsSkeleton rows={4} />
+   324→          </SectionCard>
+   325→          <SectionCard>
+   326→            <RowsSkeleton rows={4} />
+   327→          </SectionCard>
+   328→        </div>
+   329→      </div>
+   330→    );
+   331→  }
+   332→
+   333→  // Adjust milestone form state when the order identity/revision changes
+   334→  // (documented React pattern — assign state during render).
+   335→  const orderKey = `${order.id}:${order.updatedAt}`;
+   336→  if (milestoneKey !== orderKey) {
+   337→    setMilestoneKey(orderKey);
+   338→    setMilestones(initMilestones(order));
+   339→  }
+   340→
+   341→  const terminal = ORDER_TERMINAL_STATUSES.includes(order.status);
+   342→  const suggested = nextStatusAfter(order.status);
+   343→  const selected = newStatus || "";
+   344→  const destructive = selected === "CANCELLED" || selected === "REJECTED";
+   345→  const drafts = order.updates.filter((u) => !u.isPublished);
+   346→  const milestonesDirty =
+   347→    JSON.stringify(milestones) !== JSON.stringify(initMilestones(order));
+   348→  const internalNotes = order.internalNotes ?? [];
+   349→
+   350→  function submitStatus() {
+   351→    if (!selected) return;
+   352→    statusMutation.mutate({
+   353→      status: selected,
+   354→      note: note.trim() || undefined,
+   355→      trackingNumber: tracking.trim() || undefined,
+   356→      estimatedDelivery: estimatedDelivery || undefined,
+   357→    });
+   358→    setConfirmDestructive(false);
+   359→  }
+   360→
+   361→  function submitMilestones() {
+   362→    setMilestoneError(null);
+   363→    if (milestones.trackingNumber.trim().length > 80) {
+   364→      setMilestoneError("Tracking numbers are limited to 80 characters.");
+   365→      return;
+   366→    }
+   367→    saveMilestones.mutate();
+   368→  }
+   369→
+   370→  function submitNote(body: string): boolean {
+   371→    if (!body.trim()) return false;
+   372→    addNote.mutate(body.trim());
+   373→    return true;
+   374→  }
+   375→
+   376→  return (
+   377→    <div>
+   378→      <PageHeader
+   379→        title={order.orgName}
+   380→        onBack={back}
+   381→        actions={
+   382→          <div className="flex flex-wrap items-center gap-2">
+   383→            <Button
+   384→              variant="outline"
+   385→              size="sm"
+   386→              className="gap-1.5"
+   387→              onClick={() => navigate("admin-customer-detail", { id: order.orgId })}
+   388→            >
+   389→              <Building2 className="size-3.5" aria-hidden />
+   390→              <span className="font-mono text-caption text-muted-foreground">{order.orgCode}</span>
+   391→              Profile
+   392→            </Button>
+   393→            <StatusBadge status={order.status} kind="order" />
+   394→            <OrderSourceBadge source={order.sourceType} />
+   395→          </div>
+   396→        }
+   397→      />
+   398→
+   399→      <ViewEnter>
+   400→      <div className="grid items-start gap-4 sm:gap-6 lg:grid-cols-[1fr_360px]">
+   401→        {/* Left column */}
+   402→        <div className="min-w-0 space-y-4 sm:space-y-6">
+   403→          <SectionCard title="Order items">
+   404→            <Table>
+   405→              <TableHeader>
+   406→                <TableRow>
+   407→                  <Th>Product</Th>
+   408→                  <Th className="text-right">Qty</Th>
+   409→                  <Th className="text-right">Unit price</Th>
+   410→                  <Th className="text-right">Line total</Th>
+   411→                </TableRow>
+   412→              </TableHeader>
+   413→              <TableBody>
+   414→                {order.items.map((item) => (
+   415→                  <TableRow key={item.id}>
+   416→                    <Td className="max-w-[320px] whitespace-normal">
+   417→                      <p className="font-medium">{item.name}</p>
+   418→                      <p className="font-mono text-caption text-muted-foreground">{item.sku}</p>
+   419→                      {item.note && <p className="text-caption text-muted-foreground">{item.note}</p>}
+   420→                      {!item.productId && (
+   421→                        <p className="mt-0.5 text-caption font-medium text-kraft-ink">Pricing to be confirmed</p>
+   422→                      )}
+   423→                      {item.specs && <SpecChips specs={item.specs} />}
+   424→                      <ItemAttachmentChips attachments={item.attachments} />
+   425→                    </Td>
+   426→                    <Td className="tnum text-right">{item.qty.toLocaleString()}</Td>
+   427→                    <Td className="text-right">
+   428→                      <Money cents={item.unitPriceCents} />
+   429→                    </Td>
+   430→                    <Td className="text-right font-medium">
+   431→                      <Money cents={item.lineTotalCents} />
+   432→                    </Td>
+   433→                  </TableRow>
+   434→                ))}
+   435→              </TableBody>
+   436→              <TableFooter>
+   437→                <TableRow>
+   438→                  <Td className="text-right text-muted-foreground">Subtotal</Td>
+   439→                  <Td />
+   440→                  <Td />
+   441→                  <Td className="text-right">
+   442→                    <Money cents={order.subtotalCents} />
+   443→                  </Td>
+   444→                </TableRow>
+   445→                <TableRow>
+   446→                  <Td className="text-right text-muted-foreground">
+   447→                    GST ({(order.taxRateBp / 100).toFixed(1)}%)
+   448→                  </Td>
+   449→                  <Td />
+   450→                  <Td />
+   451→                  <Td className="text-right">
+   452→                    <Money cents={order.taxCents} />
+   453→                  </Td>
+   454→                </TableRow>
+   455→                <TableRow>
+   456→                  <Td className="text-right font-medium">Total</Td>
+   457→                  <Td />
+   458→                  <Td />
+   459→                  <Td className="text-right font-semibold">
+   460→                    <MoneyWithCode cents={order.totalCents} />
+   461→                  </Td>
+   462→                </TableRow>
+   463→              </TableFooter>
+   464→            </Table>
+   465→          </SectionCard>
+   466→
+   467→          {/* ── Customer updates (Update Centre) ── */}
+   468→          <SectionCard
+   469→            title="Customer updates"
+   470→            action={
+   471→              <div className="flex items-center gap-2">
+   472→                <Button variant="outline" size="sm" className="gap-1.5" onClick={() => openPublish()}>
+   473→                  <PencilLine className="size-3.5" aria-hidden />
+   474→                  New draft
+   475→                </Button>
+   476→              </div>
+   477→            }
+   478→          >
+   479→            <UpdateTimeline updates={order.updates} admin />
+   480→
+   481→            {drafts.length > 0 && (
+   482→              <div className="mt-4 border-t pt-4">
+   483→                <GroupLabel>Drafts ({drafts.length}), internal only</GroupLabel>
+   484→                <ul className="mt-2 divide-y divide-border/60 overflow-hidden rounded-md border bg-surface-sunken/70">
+   485→                  {drafts.map((d) => (
+   486→                    <li key={d.id} className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3.5 py-2.5">
+   487→                      <div className="min-w-0 flex-1">
+   488→                        <p className="truncate text-body-sm font-medium">{d.title}</p>
+   489→                        <p className="truncate text-caption text-muted-foreground">
+   490→                          Saved {timeAgo(d.createdAt)} · {d.authorName}
+   491→                        </p>
+   492→                      </div>
+   493→                      <div className="flex shrink-0 items-center gap-1">
+   494→                        <Button
+   495→                          variant="ghost"
+   496→                          size="sm"
+   497→                          className="gap-1 text-muted-foreground"
+   498→                          onClick={() => openPublish(d)}
+   499→                        >
+   500→                          <PencilLine className="size-3" aria-hidden />
+   501→                          Edit
+   502→                        </Button>
+   503→                        <Button
+   504→                          variant="ghost"
+   505→                          size="sm"
+   506→                          className="gap-1 text-[var(--status-danger-fg)] hover:bg-[var(--status-danger-bg)]"
+   507→                          onClick={() => setDeletingDraft(d)}
+   508→                        >
+   509→                          <Trash2 className="size-3" aria-hidden />
+   510→                          Delete
+   511→                        </Button>
+   512→                      </div>
+   513→                    </li>
+   514→                  ))}
+   515→                </ul>
+   516→              </div>
+   517→            )}
+   518→          </SectionCard>
+   519→
+   520→          {/* ── Change requests ── */}
+   521→          {order.changeRequests.length > 0 && (
+   522→            <SectionCard
+   523→              title="Change requests"
+   524→            >
+   525→              <div className="space-y-4">
+   526→                {order.changeRequests.map((request) => (
+   527→                  <ChangeRequestCard key={request.id} request={request} onDecided={invalidateOrderScope} />
+   528→                ))}
+   529→              </div>
+   530→            </SectionCard>
+   531→          )}
+   532→
+   533→          {/* ── Internal notes ── */}
+   534→          <SectionCard
+   535→            title={
+   536→              <span className="flex items-center gap-2">
+   537→                <Lock className="size-4 shrink-0 text-kraft-ink" aria-hidden />
+   538→                Internal notes
+   539→              </span>
+   540→            }
+   541→            description="Internal only"
+   542→            className="border-l-2 border-l-kraft bg-surface-sunken"
+   543→          >
+   544→            {internalNotes.length === 0 ? (
+   545→              <p className="rounded-md border border-dashed bg-card/60 px-4 py-5 text-center text-body-sm text-muted-foreground">
+   546→                No internal notes yet.
+   547→              </p>
+   548→            ) : (
+   549→              <ul className="divide-y divide-border/60">
+   550→                {internalNotes.map((n) => (
+   551→                  <li key={n.id} className="py-3 first:pt-0 last:pb-0">
+   552→                    <div className="flex items-baseline justify-between gap-3">
+   553→                      <p className="text-body-sm font-medium">{n.authorName}</p>
+   554→                      <p className="tnum shrink-0 text-caption text-muted-foreground">{timeAgo(n.createdAt)}</p>
+   555→                    </div>
+   556→                    <p className="mt-0.5 whitespace-pre-line text-body-sm leading-relaxed text-foreground/90">{n.body}</p>
+   557→                  </li>
+   558→                ))}
+   559→              </ul>
+   560→            )}
+   561→            <div className="mt-4 border-t pt-4">
+   562→              <Textarea
+   563→                rows={3}
+   564→                value={noteBody}
+   565→                onChange={(e) => setNoteBody(e.target.value)}
+   566→                placeholder="e.g. Confirmed die-line with plant manager, plate ready Tuesday"
+   567→                className="bg-card leading-relaxed"
+   568→                aria-label="New internal note"
+   569→                maxLength={2000}
+   570→              />
+   571→              <div className="mt-2.5 flex items-center justify-between gap-3">
+   572→                <p className="flex items-center gap-1.5 text-caption text-muted-foreground">
+   573→                  <Lock className="size-3" aria-hidden />
+   574→                  Internal only
+   575→                </p>
+   576→                <Button
+   577→                  size="sm"
+   578→                  className="gap-1.5"
+   579→                  disabled={!noteBody.trim() || addNote.isPending}
+   580→                  onClick={() => submitNote(noteBody)}
+   581→                >
+   582→                  <StickyNote className="size-3.5" aria-hidden />
+   583→                  {addNote.isPending ? "Adding…" : "Add internal note"}
+   584→                </Button>
+   585→              </div>
+   586→            </div>
+   587→          </SectionCard>
+   588→
+   589→          {/* ── Fulfilment details ── */}
+   590→          <SectionCard title="Fulfilment details">
+   591→            <dl className="grid gap-x-8 sm:grid-cols-2">
+   592→              <div className="min-w-0">
+   593→                <GroupLabel className="mb-1.5 flex items-center gap-1.5">
+   594→                  <MapPin className="size-3" aria-hidden /> Ship to
+   595→                </GroupLabel>
+   596→                <p className="text-body-sm leading-relaxed">{dashed(order.shippingText)}</p>
+   597→                <dl className="mt-3 divide-y divide-border/60">
+   598→                  <DefRow label="PO number" value={dashed(order.poNumber)} />
+   599→                  <DefRow
+   600→                    label="Tracking"
+   601→                    value={order.trackingNumber ? <span className="font-mono text-body-sm">{order.trackingNumber}</span> : "—"}
+   602→                  />
+   603→                  <DefRow
+   604→                    label="Reorder of"
+   605→                    value={order.reorderSource ? <span className="font-mono text-body-sm">{order.reorderSource}</span> : "—"}
+   606→                  />
+   607→                </dl>
+   608→              </div>
+   609→              <div className="mt-4 min-w-0 sm:mt-0">
+   610→                <GroupLabel className="mb-1.5 flex items-center gap-1.5">
+   611→                  <MessageSquareText className="size-3" aria-hidden /> Instructions from customer
+   612→                </GroupLabel>
+   613→                <p className="text-body-sm leading-relaxed text-muted-foreground">
+   614→                  {dashed(order.notes)}
+   615→                </p>
+   616→                <dl className="mt-3 divide-y divide-border/60">
+   617→                  <DefRow label="Requested" value={dashed(order.requestedDelivery)} />
+   618→                </dl>
+   619→              </div>
+   620→            </dl>
+   621→            <dl className="mt-4 grid gap-x-8 border-t pt-3 sm:grid-cols-2">
+   622→              <div className="divide-y divide-border/60 sm:col-span-2">
+   623→                <DefRow label="Requested delivery" value={dashed(formatDate(order.requestedDeliveryDate))} />
+   624→                <DefRow label="Est. dispatch" value={dashed(formatDate(order.estimatedDispatch))} />
+   625→                <DefRow label="Est. delivery" value={dashed(formatDate(order.estimatedDelivery))} />
+   626→                <DefRow
+   627→                  label="Revised delivery"
+   628→                  value={
+   629→                    order.revisedDeliveryDate ? (
+   630→                      <span className="font-medium text-kraft-ink">{formatDate(order.revisedDeliveryDate)}</span>
+   631→                    ) : (
+   632→                      "—"
+   633→                    )
+   634→                  }
+   635→                />
+   636→                <DefRow label="Actual delivery" value={dashed(formatDate(order.actualDeliveryDate))} />
+   637→                <DefRow label="Next expected update" value={dashed(formatDate(order.nextUpdateDate))} />
+   638→              </div>
+   639→            </dl>
+   640→          </SectionCard>
+   641→
+   642→          <SectionCard title="Status history">
+   643→            <OrderTimeline status={order.status} history={order.history} />
+   644→          </SectionCard>
+   645→
+   646→          {order.documents.length > 0 && (
+   647→            <SectionCard title="Related documents">
+   648→              <ul className="flex flex-wrap gap-2">
+   649→                {order.documents.map((doc) => (
+   650→                  <li key={doc.id}>
+   651→                    <span className="inline-flex max-w-full items-center gap-2 rounded-full border bg-card px-2.5 py-1 text-caption">
+   652→                      <FileText className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+   653→                      <span className="truncate font-medium">{doc.title}</span>
+   654→                      <DocumentCategoryBadge category={doc.category} />
+   655→                    </span>
+   656→                  </li>
+   657→                ))}
+   658→              </ul>
+   659→            </SectionCard>
+   660→          )}
+   661→        </div>
+   662→
+   663→        {/* Right column — workflow control + facts */}
+   664→        <div className="min-w-0 space-y-4 sm:space-y-6 lg:sticky lg:top-[84px]">
+   665→          {/* ── Prominent Update Centre entry point ── */}
+   666→          <SectionCard title="Updates">
+   667→            <div className="space-y-2.5">
+   668→              <Button variant="kraft" className="w-full gap-1.5" onClick={() => openPublish()}>
+   669→                <Send className="size-4" aria-hidden />
+   670→                Publish update
+   671→              </Button>
+   672→              <Button
+   673→                variant="outline"
+   674→                className="w-full gap-1.5"
+   675→                onClick={() => {
+   676→                  setNoteBody("");
+   677→                  setNoteDialogOpen(true);
+   678→                }}
+   679→              >
+   680→                <StickyNote className="size-3.5" aria-hidden />
+   681→                Add internal note
+   682→              </Button>
+   683→              <p className="text-caption leading-snug text-muted-foreground">
+   684→                Updates notify {order.orgName}. Internal notes do not.
+   685→              </p>
+   686→            </div>
+   687→          </SectionCard>
+   688→
+   689→          {/* ── Preserved workflow control ── */}
+   690→          <SectionCard
+   691→            title="Update status"
+   692→          >
+   693→            <div className="space-y-4">
+   694→              <div className="flex items-center justify-between gap-2 rounded-md border bg-secondary/50 px-3 py-2.5">
+   695→                <p className="text-caption text-muted-foreground">Current</p>
+   696→                <StatusBadge status={order.status} kind="order" />
+   697→              </div>
+   698→
+   699→              <div className="space-y-2">
+   700→                <Label htmlFor="order-status" className="text-body-sm">
+   701→                  New status
+   702→                </Label>
+   703→                <Select value={newStatus} onValueChange={setNewStatus}>
+   704→                  <SelectTrigger id="order-status" className="h-9 w-full text-body-sm" aria-label="New order status">
+   705→                    <SelectValue placeholder={suggested ? `Advance to ${ORDER_STATUS_LABELS[suggested]}…` : "Choose a status…"} />
+   706→                  </SelectTrigger>
+   707→                  <SelectContent>
+   708→                    <SelectGroup>
+   709→                      <SelectLabel className="text-micro">Fulfilment workflow</SelectLabel>
+   710→                      {ORDER_STATUSES.map((s) => (
+   711→                        <SelectItem key={s} value={s} disabled={s === order.status}>
+   712→                          {ORDER_STATUS_LABELS[s]}
+   713→                          {s === order.status ? " (current)" : ""}
+   714→                        </SelectItem>
+   715→                      ))}
+   716→                    </SelectGroup>
+   717→                    <SelectGroup>
+   718→                      <SelectLabel className="text-micro text-[var(--status-danger-fg)]">
+   719→                        Terminal, notifies customer
+   720→                      </SelectLabel>
+   721→                      <SelectItem value="CANCELLED">Cancelled</SelectItem>
+   722→                      <SelectItem value="REJECTED">Rejected</SelectItem>
+   723→                    </SelectGroup>
+   724→                  </SelectContent>
+   725→                </Select>
+   726→              </div>
+   727→
+   728→              <div className="space-y-2">
+   729→                <Label htmlFor="order-status-note" className="text-body-sm">
+   730→                  Status note <span className="text-muted-foreground">(shared with the customer)</span>
+   731→                </Label>
+   732→                <Input
+   733→                  id="order-status-note"
+   734→                  value={note}
+   735→                  onChange={(e) => setNote(e.target.value)}
+   736→                  placeholder="e.g. Print run scheduled for Thursday"
+   737→                  maxLength={280}
+   738→                  className="h-9 text-body-sm"
+   739→                />
+   740→              </div>
+   741→
+   742→              <div className="grid grid-cols-2 gap-2.5">
+   743→                <div className="space-y-2">
+   744→                  <Label htmlFor="order-tracking" className="flex items-center gap-1.5 text-body-sm">
+   745→                    <Truck className="size-3" aria-hidden /> Tracking no.
+   746→                  </Label>
+   747→                  <Input
+   748→                    id="order-tracking"
+   749→                    value={tracking}
+   750→                    onChange={(e) => setTracking(e.target.value)}
+   751→                    placeholder={order.trackingNumber ?? "Add tracking"}
+   752→                    className="h-9 font-mono text-body-sm"
+   753→                  />
+   754→                </div>
+   755→                <div className="space-y-2">
+   756→                  <Label htmlFor="order-eta" className="flex items-center gap-1.5 text-body-sm">
+   757→                    <CalendarDays className="size-3" aria-hidden /> Est. delivery
+   758→                  </Label>
+   759→                  <Input
+   760→                    id="order-eta"
+   761→                    type="date"
+   762→                    value={estimatedDelivery}
+   763→                    onChange={(e) => setEstimatedDelivery(e.target.value)}
+   764→                    className="h-9 text-body-sm"
+   765→                  />
+   766→                </div>
+   767→              </div>
+   768→
+   769→              {destructive ? (
+   770→                <Button className="w-full gap-1.5" variant="destructive" disabled={!selected} onClick={() => setConfirmDestructive(true)}>
+   771→                  <BellRing className="size-4" aria-hidden />
+   772→                  Set to {ORDER_STATUS_LABELS[selected]}…
+   773→                </Button>
+   774→              ) : (
+   775→                <Button className="w-full gap-1.5" disabled={!selected || statusMutation.isPending} onClick={submitStatus}>
+   776→                  <PackageCheck className="size-4" aria-hidden />
+   777→                  {statusMutation.isPending ? "Updating…" : "Update status"}
+   778→                </Button>
+   779→              )}
+   780→
+   781→              <AlertDialog open={confirmDestructive} onOpenChange={setConfirmDestructive}>
+   782→                <AlertDialogContent>
+   783→                  <AlertDialogHeader>
+   784→                    <AlertDialogTitle>
+   785→                      Set {order.orderNumber} to {ORDER_STATUS_LABELS[selected] ?? "terminal"}?
+   786→                    </AlertDialogTitle>
+   787→                    <AlertDialogDescription className="leading-relaxed">
+   788→                      The customer will be notified and this is recorded permanently in the order history. Terminal
+   789→                      statuses end the fulfilment workflow. To pause instead, add a status note.
+   790→                    </AlertDialogDescription>
+   791→                  </AlertDialogHeader>
+   792→                  <AlertDialogFooter>
+   793→                    <AlertDialogCancel>Keep order open</AlertDialogCancel>
+   794→                    <AlertDialogAction
+   795→                      className="bg-destructive text-white shadow-xs hover:bg-destructive/90 focus-visible:ring-destructive/35"
+   796→                      onClick={submitStatus}
+   797→                      disabled={statusMutation.isPending}
+   798→                    >
+   799→                      {statusMutation.isPending ? "Updating…" : `Yes, mark ${ORDER_STATUS_LABELS[selected] ?? ""}`}
+   800→                    </AlertDialogAction>
+   801→                  </AlertDialogFooter>
+   802→                </AlertDialogContent>
+   803→              </AlertDialog>
+   804→
+   805→              {terminal && (
+   806→                <p className="flex items-start gap-2 rounded-md border bg-secondary/50 px-3 py-2.5 text-caption leading-relaxed text-muted-foreground">
+   807→                  <Info className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+   808→                  This order is in a terminal state. Re-selecting a fulfilment status restarts the workflow record.
+   809→                </p>
+   810→              )}
+   811→            </div>
+   812→          </SectionCard>
+   813→
+   814→          {/* ── Milestone dates ── */}
+   815→          <SectionCard title="Milestone dates">
+   816→            <div className="space-y-3">
+   817→              <div className="grid grid-cols-2 gap-2.5">
+   818→                <div className="space-y-1.5">
+   819→                  <Label htmlFor="ms-requested" className="text-body-sm">
+   820→                    Requested delivery
+   821→                  </Label>
+   822→                  <Input
+   823→                    id="ms-requested"
+   824→                    type="date"
+   825→                    value={milestones.requestedDeliveryDate}
+   826→                    onChange={(e) => setMilestones((m) => ({ ...m, requestedDeliveryDate: e.target.value }))}
+   827→                    className="h-9 text-body-sm"
+   828→                  />
+   829→                </div>
+   830→                <div className="space-y-1.5">
+   831→                  <Label htmlFor="ms-dispatch" className="text-body-sm">
+   832→                    Est. dispatch
+   833→                  </Label>
+   834→                  <Input
+   835→                    id="ms-dispatch"
+   836→                    type="date"
+   837→                    value={milestones.estimatedDispatch}
+   838→                    onChange={(e) => setMilestones((m) => ({ ...m, estimatedDispatch: e.target.value }))}
+   839→                    className="h-9 text-body-sm"
+   840→                  />
+   841→                </div>
+   842→                <div className="space-y-1.5">
+   843→                  <Label htmlFor="ms-eta" className="text-body-sm">
+   844→                    Est. delivery
+   845→                  </Label>
+   846→                  <Input
+   847→                    id="ms-eta"
+   848→                    type="date"
+   849→                    value={milestones.estimatedDelivery}
+   850→                    onChange={(e) => setMilestones((m) => ({ ...m, estimatedDelivery: e.target.value }))}
+   851→                    className="h-9 text-body-sm"
+   852→                  />
+   853→                </div>
+   854→                <div className="space-y-1.5">
+   855→                  <Label htmlFor="ms-revised" className="text-body-sm">
+   856→                    Revised delivery
+   857→                  </Label>
+   858→                  <Input
+   859→                    id="ms-revised"
+   860→                    type="date"
+   861→                    value={milestones.revisedDeliveryDate}
+   862→                    onChange={(e) => setMilestones((m) => ({ ...m, revisedDeliveryDate: e.target.value }))}
+   863→                    className="h-9 text-body-sm"
+   864→                  />
+   865→                </div>
+   866→                <div className="space-y-1.5">
+   867→                  <Label htmlFor="ms-actual" className="text-body-sm">
+   868→                    Actual delivery
+   869→                  </Label>
+   870→                  <Input
+   871→                    id="ms-actual"
+   872→                    type="date"
+   873→                    value={milestones.actualDeliveryDate}
+   874→                    onChange={(e) => setMilestones((m) => ({ ...m, actualDeliveryDate: e.target.value }))}
+   875→                    className="h-9 text-body-sm"
+   876→                  />
+   877→                </div>
+   878→                <div className="space-y-1.5">
+   879→                  <Label htmlFor="ms-next" className="flex items-center gap-1.5 text-body-sm">
+   880→                    <CalendarClock className="size-3" aria-hidden /> Next update
+   881→                  </Label>
+   882→                  <Input
+   883→                    id="ms-next"
+   884→                    type="date"
+   885→                    value={milestones.nextUpdateDate}
+   886→                    onChange={(e) => setMilestones((m) => ({ ...m, nextUpdateDate: e.target.value }))}
+   887→                    className="h-9 text-body-sm"
+   888→                  />
+   889→                </div>
+   890→              </div>
+   891→              <p className="text-caption leading-snug text-muted-foreground">
+   892→                The next-update date is an internal reminder. It never notifies the customer.
+   893→              </p>
+   894→              <div className="space-y-1.5">
+   895→                <Label htmlFor="ms-tracking" className="flex items-center gap-1.5 text-body-sm">
+   896→                  <Truck className="size-3" aria-hidden /> Tracking no.
+   897→                </Label>
+   898→                <Input
+   899→                  id="ms-tracking"
+   900→                  value={milestones.trackingNumber}
+   901→                  onChange={(e) => setMilestones((m) => ({ ...m, trackingNumber: e.target.value }))}
+   902→                  placeholder={order.trackingNumber ?? "Add tracking"}
+   903→                  className="h-9 font-mono text-body-sm"
+   904→                />
+   905→              </div>
+   906→              {milestoneError && <FieldError>{milestoneError}</FieldError>}
+   907→              <Button
+   908→                className="w-full gap-1.5"
+   909→                disabled={!milestonesDirty || saveMilestones.isPending}
+   910→                onClick={submitMilestones}
+   911→              >
+   912→                <CalendarDays className="size-4" aria-hidden />
+   913→                {saveMilestones.isPending ? "Saving…" : "Save dates"}
+   914→              </Button>
+   915→              <p className="text-caption leading-snug text-muted-foreground">
+   916→                Clear a date to remove it. Saving never notifies the customer.
+   917→              </p>
+   918→            </div>
+   919→          </SectionCard>
+   920→
+   921→          <SectionCard title="Summary">
+   922→            <dl>
+   923→              <DefRow
+   924→                label="Customer"
+   925→                value={
+   926→                  <button
+   927→                    type="button"
+   928→                    onClick={() => navigate("admin-customer-detail", { id: order.orgId })}
+   929→                    className="text-left underline-offset-4 transition-colors hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded"
+   930→                  >
+   931→                    {order.orgName}
+   932→                  </button>
+   933→                }
+   934→              />
+   935→              <DefRow label="Order value" value={<MoneyWithCode cents={order.totalCents} />} />
+   936→              <DefRow label="Last updated" value={formatDateTime(order.updatedAt)} />
+   937→              {order.sourceType !== "PORTAL" && (
+   938→                <>
+   939→                  <DefRow label="Source" value={ORDER_SOURCE_LABELS[order.sourceType] ?? order.sourceType} />
+   940→                  {order.recordedByName && <DefRow label="Recorded by" value={order.recordedByName} />}
+   941→                </>
+   942→              )}
+   943→            </dl>
+   944→            <div className="mt-3 flex flex-wrap gap-2 border-t pt-3">
+   945→              <Button
+   946→                variant="ghost"
+   947→                size="sm"
+   948→                className="gap-1.5 text-muted-foreground"
+   949→                onClick={() => navigate("admin-notifications")}
+   950→              >
+   951→                <BellRing className="size-3.5" aria-hidden /> Open message log
+   952→              </Button>
+   953→              <Button
+   954→                variant="ghost"
+   955→                size="sm"
+   956→                className="gap-1.5 text-muted-foreground"
+   957→                onClick={() => navigate("admin-documents")}
+   958→              >
+   959→                <Receipt className="size-3.5" aria-hidden /> Related documents
+   960→              </Button>
+   961→            </div>
+   962→          </SectionCard>
+   963→        </div>
+   964→      </div>
+   965→      </ViewEnter>
+   966→
+   967→      {/* ─── Dialogs ─────────────────────────────────────────────────────────── */}
+   968→      <PublishUpdateDialog
+   969→        orderId={orderId}
+   970→        order={order}
+   971→        open={publishOpen}
+   972→        onOpenChange={setPublishOpen}
+   973→        update={editingDraft ?? undefined}
+   974→      />
+   975→
+   976→      <Dialog open={noteDialogOpen} onOpenChange={setNoteDialogOpen}>
+   977→        <DialogContent className="sm:max-w-[480px]">
+   978→          <form
+   979→            onSubmit={(e) => {
+   980→              e.preventDefault();
+   981→              if (submitNote(noteBody)) {
+   982→                setNoteDialogOpen(false);
+   983→              }
+   984→            }}
+   985→            className="space-y-4"
+   986→          >
+   987→            <DialogHeader className="border-b pb-4">
+   988→              <DialogTitle>Add internal note</DialogTitle>
+   989→              <DialogDescription className="leading-relaxed">
+   990→                Internal only, never shown to {order.orgName}.
+   991→              </DialogDescription>
+   992→            </DialogHeader>
+   993→            <div className="space-y-1.5">
+   994→              <Label htmlFor="note-dialog-body" className="text-body-sm">
+   995→                Note
+   996→              </Label>
+   997→              <Textarea
+   998→                id="note-dialog-body"
+   999→                rows={5}
+  1000→                value={noteBody}
+  1001→                onChange={(e) => setNoteBody(e.target.value)}
+  1002→                placeholder="e.g. Confirmed die-line with plant manager, plate ready Tuesday"
+  1003→                className="leading-relaxed"
+  1004→                maxLength={2000}
+  1005→                required
+  1006→              />
+  1007→            </div>
+  1008→            <DialogFooter className="border-t pt-4">
+  1009→              <Button type="button" variant="ghost" onClick={() => setNoteDialogOpen(false)}>
+  1010→                Cancel
+  1011→              </Button>
+  1012→              <Button type="submit" className="gap-1.5" disabled={!noteBody.trim() || addNote.isPending}>
+  1013→                <StickyNote className="size-4" aria-hidden />
+  1014→                {addNote.isPending ? "Adding…" : "Add note"}
+  1015→              </Button>
+  1016→            </DialogFooter>
+  1017→          </form>
+  1018→        </DialogContent>
+  1019→      </Dialog>
+  1020→
+  1021→      <AlertDialog open={deletingDraft !== null} onOpenChange={(v) => !v && setDeletingDraft(null)}>
+  1022→        <AlertDialogContent>
+  1023→          <AlertDialogHeader>
+  1024→            <AlertDialogTitle>Delete draft “{deletingDraft?.title}”?</AlertDialogTitle>
+  1025→            <AlertDialogDescription className="leading-relaxed">
+  1026→              The unpublished draft disappears from {order.orderNumber}. The customer never saw it, and published
+  1027→              updates are unaffected.
+  1028→            </AlertDialogDescription>
+  1029→          </AlertDialogHeader>
+  1030→          <AlertDialogFooter>
+  1031→            <AlertDialogCancel>Keep draft</AlertDialogCancel>
+  1032→            <AlertDialogAction
+  1033→              className="bg-destructive text-white shadow-xs hover:bg-destructive/90 focus-visible:ring-destructive/35"
+  1034→              disabled={deleteDraft.isPending}
+  1035→              onClick={(e) => {
+  1036→                e.preventDefault();
+  1037→                if (deletingDraft) deleteDraft.mutate(deletingDraft.id);
+  1038→              }}
+  1039→            >
+  1040→              {deleteDraft.isPending ? "Deleting…" : "Delete draft"}
+  1041→            </AlertDialogAction>
+  1042→          </AlertDialogFooter>
+  1043→        </AlertDialogContent>
+  1044→      </AlertDialog>
+  1045→    </div>
+  1046→  );
+  1047→}
+  1048→
+  1049→// ─── Change request review card ──────────────────────────────────────────────
+  1050→
+  1051→function ChangeRequestCard({
+  1052→  request,
+  1053→  onDecided,
+  1054→}: {
+  1055→  request: ChangeRequestDto;
+  1056→  onDecided: () => void;
+  1057→}) {
+  1058→  const queryClient = useQueryClient();
+  1059→  const [confirmApprove, setConfirmApprove] = useState(false);
+  1060→  const [declineOpen, setDeclineOpen] = useState(false);
+  1061→  const [declineNote, setDeclineNote] = useState("");
+  1062→  const [countering, setCountering] = useState(false);
+  1063→  const [counterQty, setCounterQty] = useState<Record<number, string>>(() =>
+  1064→    Object.fromEntries(
+  1065→      request.changes
+  1066→        .map((c, i) => (c.kind === "QUANTITY" && c.newQty != null ? [i, String(c.newQty)] : null))
+  1067→        .filter((v): v is [number, string] => v !== null),
+  1068→    ),
+  1069→  );
+  1070→  const [counterDate, setCounterDate] = useState<string>(() => {
+  1071→    const dateItem = request.changes.find((c) => c.kind === "DATE" && c.newDate);
+  1072→    return dateItem?.newDate ? toDateInput(dateItem.newDate) : "";
+  1073→  });
+  1074→  const [counterNote, setCounterNote] = useState("");
+  1075→  const [counterError, setCounterError] = useState<string | null>(null);
+  1076→
+  1077→  const decide = useMutation({
+  1078→    mutationFn: (payload: { decision: "ACCEPT" | "DECLINE" | "COUNTER"; note?: string; counter?: ChangeItem[] }) =>
+  1079→      api.post<{ ok: boolean }>(`/api/admin/change-requests/${request.id}/decide`, payload),
+  1080→    onSuccess: (_res, payload) => {
+  1081→      queryClient.invalidateQueries({ queryKey: ["admin", "order", request.orderId] });
+  1082→      queryClient.invalidateQueries({ queryKey: ["admin", "orders"] });
+  1083→      queryClient.invalidateQueries({ queryKey: ["admin", "attention"] });
+  1084→      queryClient.invalidateQueries({ queryKey: ["notifications"] });
+  1085→      onDecided();
+  1086→      setConfirmApprove(false);
+  1087→      setDeclineOpen(false);
+  1088→      setDeclineNote("");
+  1089→      setCountering(false);
+  1090→      toast({
+  1091→        title:
+  1092→          payload.decision === "ACCEPT"
+  1093→            ? "Change approved and applied"
+  1094→            : payload.decision === "DECLINE"
+  1095→              ? "Change request declined"
+  1096→              : "Alternative proposed",
+  1097→      });
+  1098→    },
+  1099→    onError: (err: Error) => toast({ title: "Could not record decision", description: err.message }),
+  1100→  });
+  1101→
+  1102→  const pending = request.status === "PENDING";
+  1103→
+  1104→  function buildCounter(): ChangeItem[] | null {
+  1105→    const items: ChangeItem[] = request.changes.map((c, i) => {
+  1106→      if (c.kind === "QUANTITY" && counterQty[i] !== undefined) {
+  1107→        const qty = parseInt(counterQty[i], 10);
+  1108→        if (!Number.isFinite(qty) || qty < 1) return c;
+  1109→        return { ...c, newQty: qty };
+  1110→      }
+  1111→      if (c.kind === "DATE" && counterDate) return { ...c, newDate: counterDate };
+  1112→      return c;
+  1113→    });
+  1114→    const badQty = request.changes.some((c, i) => {
+  1115→      if (c.kind !== "QUANTITY" || counterQty[i] === undefined) return false;
+  1116→      const qty = parseInt(counterQty[i], 10);
+  1117→      return !Number.isFinite(qty) || qty < 1;
+  1118→    });
+  1119→    if (badQty) {
+  1120→      setCounterError("Quantities must be whole numbers of at least 1.");
+  1121→      return null;
+  1122→    }
+  1123→    setCounterError(null);
+  1124→    return items;
+  1125→  }
+  1126→
+  1127→  return (
+  1128→    <article className="rounded-[14px] border bg-card shadow-xs">
+  1129→      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-2 border-b px-4 py-3 sm:px-4">
+  1130→        <ChangeStatusBadge status={request.status} />
+  1131→        <p className="text-body-sm font-medium">
+  1132→          {request.requestedByName}
+  1133→          <span className="ml-1 font-normal text-muted-foreground">requested {timeAgo(request.createdAt)}</span>
+  1134→        </p>
+  1135→        {request.appliedAt && (
+  1136→          <span className="rounded-full bg-[var(--status-done-bg)] px-1.5 py-0.5 text-micro font-medium text-[var(--status-done-fg)]">
+  1137→            applied
+  1138→          </span>
+  1139→        )}
+  1140→      </div>
+  1141→
+  1142→      <div className="space-y-3 px-4 py-3.5 sm:px-4">
+  1143→        <ul className="space-y-1.5">
+  1144→          {request.changes.map((c, i) => (
+  1145→            <li key={i} className="flex items-start gap-2 text-body-sm leading-relaxed">
+  1146→              <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-muted-foreground/40" aria-hidden />
+  1147→              <span>{describeChange(c)}</span>
+  1148→            </li>
+  1149→          ))}
+  1150→        </ul>
+  1151→
+  1152→        {request.requestNote && (
+  1153→          <div className="rounded-md border bg-secondary/50 px-3 py-2.5">
+  1154→            <GroupLabel>Customer&apos;s note</GroupLabel>
+  1155→            <p className="mt-1 whitespace-pre-line text-body-sm leading-relaxed text-foreground/90">
+  1156→              {request.requestNote}
+  1157→            </p>
+  1158→          </div>
+  1159→        )}
+  1160→
+  1161→        {/* Decision trail */}
+  1162→        {request.status === "ACCEPTED" && (
+  1163→          <div className="rounded-md bg-[var(--status-done-bg)] px-3 py-2.5">
+  1164→            <p className="text-caption font-medium text-[var(--status-done-fg)]">
+  1165→              Approved{request.adminName ? ` by ${request.adminName}` : ""}
+  1166→              {request.decidedAt ? ` · ${formatDate(request.decidedAt)}` : ""}
+  1167→              {request.appliedAt ? " · applied" : ""}
+  1168→            </p>
+  1169→            {request.decisionNote && (
+  1170→              <p className="mt-1 text-body-sm leading-relaxed text-[var(--status-done-fg)]">{request.decisionNote}</p>
+  1171→            )}
+  1172→          </div>
+  1173→        )}
+  1174→        {request.status === "DECLINED" && (
+  1175→          <div className="rounded-md bg-[var(--status-danger-bg)] px-3 py-2.5">
+  1176→            <p className="text-caption font-medium text-[var(--status-danger-fg)]">
+  1177→              Declined{request.adminName ? ` by ${request.adminName}` : ""}
+  1178→              {request.decidedAt ? ` · ${formatDate(request.decidedAt)}` : ""}
+  1179→            </p>
+  1180→            {request.decisionNote && (
+  1181→              <p className="mt-1 text-body-sm leading-relaxed text-[var(--status-danger-fg)]">{request.decisionNote}</p>
+  1182→            )}
+  1183→          </div>
+  1184→        )}
+  1185→        {request.status === "WITHDRAWN" && (
+  1186→          <p className="rounded-md border bg-secondary/50 px-3 py-2.5 text-body-sm text-muted-foreground">
+  1187→            Withdrawn by {request.requestedByName}. No action needed.
+  1188→          </p>
+  1189→        )}
+  1190→
+  1191→        {/* Counter proposal */}
+  1192→        {request.status === "COUNTERED" && request.counter && (
+  1193→          <div className="rounded-md border border-kraft/30 bg-kraft-soft/60 px-3 py-2.5">
+  1194→            <GroupLabel className="text-kraft-ink">Alternative proposed</GroupLabel>
+  1195→            <ul className="mt-1.5 space-y-1">
+  1196→              {request.counter.map((c, i) => (
+  1197→                <li key={i} className="text-body-sm leading-relaxed text-kraft-ink">
+  1198→                  {describeChange(c)}
+  1199→                </li>
+  1200→              ))}
+  1201→            </ul>
+  1202→            {request.counterNote && (
+  1203→              <p className="mt-1.5 text-body-sm leading-relaxed text-kraft-ink">{request.counterNote}</p>
+  1204→            )}
+  1205→            <p className="mt-1.5 text-caption font-medium text-kraft-ink">
+  1206→              {request.counterDecision
+  1207→                ? `Customer ${request.counterDecision.toLowerCase()} the alternative`
+  1208→                : "Awaiting customer response"}
+  1209→            </p>
+  1210→          </div>
+  1211→        )}
+  1212→
+  1213→        {/* Pending decision controls */}
+  1214→        {pending && !countering && (
+  1215→          <div className="flex flex-wrap items-center gap-2 border-t pt-3">
+  1216→            <Button
+  1217→              size="sm"
+  1218→              className="gap-1.5"
+  1219→              disabled={decide.isPending}
+  1220→              onClick={() => setConfirmApprove(true)}
+  1221→            >
+  1222→              <CheckCircle2 className="size-3.5" aria-hidden />
+  1223→              Approve &amp; apply
+  1224→            </Button>
+  1225→            <Button
+  1226→              variant="outline"
+  1227→              size="sm"
+  1228→              className="gap-1.5 text-[var(--status-danger-fg)] hover:bg-[var(--status-danger-bg)]"
+  1229→              disabled={decide.isPending}
+  1230→              onClick={() => setDeclineOpen(true)}
+  1231→            >
+  1232→              <Ban className="size-3.5" aria-hidden />
+  1233→              Decline
+  1234→            </Button>
+  1235→            <Button
+  1236→              variant="outline"
+  1237→              size="sm"
+  1238→              className="gap-1.5"
+  1239→              disabled={decide.isPending}
+  1240→              onClick={() => setCountering(true)}
+  1241→            >
+  1242→              <ArrowLeftRight className="size-3.5" aria-hidden />
+  1243→              Propose alternative
+  1244→            </Button>
+  1245→          </div>
+  1246→        )}
+  1247→
+  1248→        {/* Counter editor */}
+  1249→        {pending && countering && (
+  1250→          <div className="space-y-3 rounded-md border bg-surface-sunken/70 px-3.5 py-3">
+  1251→            <GroupLabel>Propose an alternative</GroupLabel>
+  1252→            <ul className="space-y-2">
+  1253→              {request.changes.map((c, i) => (
+  1254→                <li key={i} className="flex flex-wrap items-center gap-2 text-body-sm">
+  1255→                  <span className="min-w-0 flex-1 text-muted-foreground">{describeChange(c)}</span>
+  1256→                  {c.kind === "QUANTITY" && (
+  1257→                    <span className="flex items-center gap-1.5">
+  1258→                      <Label htmlFor={`counter-qty-${i}`} className="text-caption text-muted-foreground">
+  1259→                        Alternative qty
+  1260→                      </Label>
+  1261→                      <Input
+  1262→                        id={`counter-qty-${i}`}
+  1263→                        inputMode="numeric"
+  1264→                        value={counterQty[i] ?? ""}
+  1265→                        onChange={(e) => setCounterQty((q) => ({ ...q, [i]: e.target.value }))}
+  1266→                        className="tnum h-8 w-24 text-body-sm"
+  1267→                        placeholder={String(c.newQty ?? "")}
+  1268→                      />
+  1269→                    </span>
+  1270→                  )}
+  1271→                  {c.kind === "DATE" && (
+  1272→                    <span className="flex items-center gap-1.5">
+  1273→                      <Label htmlFor="counter-date" className="text-caption text-muted-foreground">
+  1274→                        Alternative date
+  1275→                      </Label>
+  1276→                      <Input
+  1277→                        id="counter-date"
+  1278→                        type="date"
+  1279→                        value={counterDate}
+  1280→                        onChange={(e) => setCounterDate(e.target.value)}
+  1281→                        className="h-8 text-body-sm"
+  1282→                      />
+  1283→                    </span>
+  1284→                  )}
+  1285→                </li>
+  1286→              ))}
+  1287→            </ul>
+  1288→            <div className="space-y-1.5">
+  1289→              <Label htmlFor="counter-note" className="text-body-sm">
+  1290→                Note to the customer <span className="text-muted-foreground">(optional)</span>
+  1291→              </Label>
+  1292→              <Textarea
+  1293→                id="counter-note"
+  1294→                rows={3}
+  1295→                value={counterNote}
+  1296→                onChange={(e) => setCounterNote(e.target.value)}
+  1297→                placeholder="e.g. We can accommodate 600 units at this price, let us know if that works."
+  1298→                className="bg-card leading-relaxed"
+  1299→                maxLength={600}
+  1300→              />
+  1301→            </div>
+  1302→            {counterError && <FieldError>{counterError}</FieldError>}
+  1303→            <div className="flex items-center gap-2">
+  1304→              <Button
+  1305→                size="sm"
+  1306→                className="gap-1.5"
+  1307→                disabled={decide.isPending}
+  1308→                onClick={() => {
+  1309→                  const counter = buildCounter();
+  1310→                  if (counter) {
+  1311→                    decide.mutate({
+  1312→                      decision: "COUNTER",
+  1313→                      note: counterNote.trim() || undefined,
+  1314→                      counter,
+  1315→                    });
+  1316→                  }
+  1317→                }}
+  1318→              >
+  1319→                <ArrowLeftRight className="size-3.5" aria-hidden />
+  1320→                {decide.isPending ? "Sending…" : "Send alternative"}
+  1321→              </Button>
+  1322→              <Button
+  1323→                variant="ghost"
+  1324→                size="sm"
+  1325→                className="text-muted-foreground"
+  1326→                onClick={() => setCountering(false)}
+  1327→              >
+  1328→                Back
+  1329→              </Button>
+  1330→            </div>
+  1331→          </div>
+  1332→        )}
+  1333→      </div>
+  1334→
+  1335→      {/* Approve confirm */}
+  1336→      <AlertDialog open={confirmApprove} onOpenChange={setConfirmApprove}>
+  1337→        <AlertDialogContent>
+  1338→          <AlertDialogHeader>
+  1339→            <AlertDialogTitle>Approve and apply this change?</AlertDialogTitle>
+  1340→            <AlertDialogDescription className="leading-relaxed">
+  1341→              Applying updates quantities and specifications on the order. {request.requestedByName} and the customer
+  1342→              will be notified.
+  1343→            </AlertDialogDescription>
+  1344→          </AlertDialogHeader>
+  1345→          <AlertDialogFooter>
+  1346→            <AlertDialogCancel>Not now</AlertDialogCancel>
+  1347→            <AlertDialogAction disabled={decide.isPending} onClick={() => decide.mutate({ decision: "ACCEPT" })}>
+  1348→              {decide.isPending ? "Applying…" : "Approve & apply"}
+  1349→            </AlertDialogAction>
+  1350→          </AlertDialogFooter>
+  1351→        </AlertDialogContent>
+  1352→      </AlertDialog>
+  1353→
+  1354→      {/* Decline dialog */}
+  1355→      <Dialog open={declineOpen} onOpenChange={setDeclineOpen}>
+  1356→        <DialogContent className="sm:max-w-[440px]">
+  1357→          <form
+  1358→            onSubmit={(e) => {
+  1359→              e.preventDefault();
+  1360→              decide.mutate({ decision: "DECLINE", note: declineNote.trim() || undefined });
+  1361→            }}
+  1362→            className="space-y-4"
+  1363→          >
+  1364→            <DialogHeader className="border-b pb-4">
+  1365→              <DialogTitle>Decline this change request</DialogTitle>
+  1366→              <DialogDescription className="leading-relaxed">
+  1367→                {request.requestedByName} will see the request was declined{declineNote.trim() ? ", with your note" : ""}.
+  1368→                The order stays exactly as it is.
+  1369→              </DialogDescription>
+  1370→            </DialogHeader>
+  1371→            <div className="space-y-1.5">
+  1372→              <Label htmlFor="decline-note" className="text-body-sm">
+  1373→                Note to the customer <span className="text-muted-foreground">(optional)</span>
+  1374→              </Label>
+  1375→              <Textarea
+  1376→                id="decline-note"
+  1377→                rows={3}
+  1378→                value={declineNote}
+  1379→                onChange={(e) => setDeclineNote(e.target.value)}
+  1380→                placeholder="e.g. The print plates are already cut for this run, happy to include it in the next order."
+  1381→                className="leading-relaxed"
+  1382→                maxLength={600}
+  1383→              />
+  1384→            </div>
+  1385→            <DialogFooter className="border-t pt-4">
+  1386→              <Button type="button" variant="ghost" onClick={() => setDeclineOpen(false)}>
+  1387→                Keep request open
+  1388→              </Button>
+  1389→              <Button type="submit" variant="destructive" className="gap-1.5" disabled={decide.isPending}>
+  1390→                <Ban className="size-4" aria-hidden />
+  1391→                {decide.isPending ? "Declining…" : "Decline request"}
+  1392→              </Button>
+  1393→            </DialogFooter>
+  1394→          </form>
+  1395→        </DialogContent>
+  1396→      </Dialog>
+  1397→    </article>
+  1398→  );
+  1399→}
+  1400→
+  1401→

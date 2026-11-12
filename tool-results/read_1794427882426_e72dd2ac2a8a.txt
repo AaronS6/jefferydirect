@@ -1,0 +1,878 @@
+     1→     1→// DTO serializers — map Prisma rows onto the exact shapes declared in
+     2→     2→// src/types/index.ts. Structural input types keep these decoupled from
+     3→     3→// Prisma's generated payload types (any include result that satisfies the
+     4→     4→// shape can be passed in).
+     5→     5→
+     6→     6→import type {
+     7→     7→  AddressDto,
+     8→     8→  AttachmentMeta,
+     9→     9→  CategoryDto,
+    10→    10→  ChangeItem,
+    11→    11→  ChangeRequestDto,
+    12→    12→  DocumentDto,
+    13→    13→  InternalNoteDto,
+    14→    14→  LineSpecs,
+    15→    15→  MessageDto,
+    16→    16→  NotificationDto,
+    17→    17→  OrderDetail,
+    18→    18→  OrderDraftDto,
+    19→    19→  OrderDraftPayload,
+    20→    20→  OrderItemDto,
+    21→    21→  OrderListItem,
+    22→    22→  OrderUpdateDto,
+    23→    23→  OrgPreferences,
+    24→    24→  ProductDetail,
+    25→    25→  ProductListItem,
+    26→    26→  QuotationDetail,
+    27→    27→  QuotationItemDto,
+    28→    28→  QuotationListItem,
+    29→    29→  SavedProductDto,
+    30→    30→  SessionInfo,
+    31→    31→  UpdateTemplateDto,
+    32→    32→} from "@/types";
+    33→    33→
+    34→    34→// ─── Session ──────────────────────────────────────────────────────────────────
+    35→    35→
+    36→    36→export function parseNotifyPrefs(json: string | null | undefined): Record<string, boolean> {
+    37→    37→  try {
+    38→    38→    const parsed: unknown = JSON.parse(json ?? "{}");
+    39→    39→    if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+    40→    40→      const out: Record<string, boolean> = {};
+    41→    41→      for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+    42→    42→        if (typeof v === "boolean") out[k] = v;
+    43→    43→      }
+    44→    44→      return out;
+    45→    45→    }
+    46→    46→  } catch {
+    47→    47→    // fall through to empty prefs
+    48→    48→  }
+    49→    49→  return {};
+    50→    50→}
+    51→    51→
+    52→    52→export function parseJson<T>(json: string | null | undefined, fallback: T): T {
+    53→    53→  try {
+    54→    54→    const parsed: unknown = JSON.parse(json ?? "null");
+    55→    55→    if (parsed !== null && typeof parsed === "object") return parsed as T;
+    56→    56→  } catch {
+    57→    57→    // fall through to fallback
+    58→    58→  }
+    59→    59→  return fallback;
+    60→    60→}
+    61→    61→
+    62→    62→export function parseSpecJson(json: string | null | undefined): LineSpecs | null {
+    63→    63→  if (!json) return null;
+    64→    64→  try {
+    65→    65→    const parsed: unknown = JSON.parse(json);
+    66→    66→    if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+    67→    67→      return parsed as LineSpecs;
+    68→    68→    }
+    69→    69→  } catch {
+    70→    70→    // fall through
+    71→    71→  }
+    72→    72→  return null;
+    73→    73→}
+    74→    74→
+    75→    75→export function parseAttachmentsJson(json: string | null | undefined): AttachmentMeta[] {
+    76→    76→  if (!json) return [];
+    77→    77→  try {
+    78→    78→    const parsed: unknown = JSON.parse(json);
+    79→    79→    if (Array.isArray(parsed)) {
+    80→    80→      return parsed
+    81→    81→        .filter(
+    82→    82→          (a): a is AttachmentMeta =>
+    83→    83→            a !== null && typeof a === "object" && typeof (a as AttachmentMeta).name === "string",
+    84→    84→        )
+    85→    85→        .map((a) => ({
+    86→    86→          name: a.name,
+    87→    87→          sizeLabel: typeof a.sizeLabel === "string" ? a.sizeLabel : "—",
+    88→    88→          ...(typeof a.note === "string" ? { note: a.note } : {}),
+    89→    89→        }));
+    90→    90→    }
+    91→    91→  } catch {
+    92→    92→    // fall through
+    93→    93→  }
+    94→    94→  return [];
+    95→    95→}
+    96→    96→
+    97→    97→export function parseChangeItems(json: string | null | undefined): ChangeItem[] {
+    98→    98→  if (!json) return [];
+    99→    99→  try {
+   100→   100→    const parsed: unknown = JSON.parse(json);
+   101→   101→    if (Array.isArray(parsed)) return parsed.filter((c) => c !== null && typeof c === "object") as ChangeItem[];
+   102→   102→  } catch {
+   103→   103→    // fall through
+   104→   104→  }
+   105→   105→  return [];
+   106→   106→}
+   107→   107→
+   108→   108→export function parseOrgPreferences(json: string | null | undefined): OrgPreferences | null {
+   109→   109→  if (!json) return null;
+   110→   110→  try {
+   111→   111→    const parsed: unknown = JSON.parse(json);
+   112→   112→    if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+   113→   113→      return parsed as OrgPreferences;
+   114→   114→    }
+   115→   115→  } catch {
+   116→   116→    // fall through
+   117→   117→  }
+   118→   118→  return null;
+   119→   119→}
+   120→   120→
+   121→   121→export type SessionOrg = {
+   122→   122→  id: string;
+   123→   123→  code: string;
+   124→   124→  name: string;
+   125→   125→  status: string;
+   126→   126→  billingLine1: string;
+   127→   127→  billingCity: string;
+   128→   128→  billingProvince: string;
+   129→   129→  billingPostal: string;
+   130→   130→  phone: string;
+   131→   131→};
+   132→   132→
+   133→   133→export type SessionUserRow = {
+   134→   134→  id: string;
+   135→   135→  email: string;
+   136→   136→  name: string;
+   137→   137→  role: string;
+   138→   138→  title: string | null;
+   139→   139→  phone: string | null;
+   140→   140→  notifyPrefs: string;
+   141→   141→  orgRole: string;
+   142→   142→};
+   143→   143→
+   144→   144→export function serializeSession(user: SessionUserRow, organization: SessionOrg | null | undefined): SessionInfo {
+   145→   145→  return {
+   146→   146→    user: {
+   147→   147→      id: user.id,
+   148→   148→      email: user.email,
+   149→   149→      name: user.name,
+   150→   150→      role: user.role === "ADMIN" ? "ADMIN" : "CUSTOMER",
+   151→   151→      title: user.title,
+   152→   152→      phone: user.phone,
+   153→   153→      orgRole:
+   154→   154→        user.role === "ADMIN"
+   155→   155→          ? "ORG_ADMIN"
+   156→   156→          : user.orgRole === "PURCHASING" || user.orgRole === "READONLY"
+   157→   157→            ? user.orgRole
+   158→   158→            : "ORG_ADMIN",
+   159→   159→      notifyPrefs: parseNotifyPrefs(user.notifyPrefs),
+   160→   160→    },
+   161→   161→    organization: organization
+   162→   162→      ? {
+   163→   163→          id: organization.id,
+   164→   164→          code: organization.code,
+   165→   165→          name: organization.name,
+   166→   166→          status: organization.status,
+   167→   167→          billingLine1: organization.billingLine1,
+   168→   168→          billingCity: organization.billingCity,
+   169→   169→          billingProvince: organization.billingProvince,
+   170→   170→          billingPostal: organization.billingPostal,
+   171→   171→          phone: organization.phone,
+   172→   172→        }
+   173→   173→      : null,
+   174→   174→  };
+   175→   175→}
+   176→   176→
+   177→   177→// ─── Categories ───────────────────────────────────────────────────────────────
+   178→   178→
+   179→   179→export function serializeCategory(c: {
+   180→   180→  id: string;
+   181→   181→  name: string;
+   182→   182→  slug: string;
+   183→   183→  description: string | null;
+   184→   184→}): CategoryDto {
+   185→   185→  return { id: c.id, name: c.name, slug: c.slug, description: c.description };
+   186→   186→}
+   187→   187→
+   188→   188→// ─── Products ────────────────────────────────────────────────────────────────
+   189→   189→
+   190→   190→export type ProductRow = {
+   191→   191→  id: string;
+   192→   192→  sku: string;
+   193→   193→  name: string;
+   194→   194→  categoryId: string;
+   195→   195→  shortDescription: string;
+   196→   196→  description: string;
+   197→   197→  dimensions: string | null;
+   198→   198→  material: string | null;
+   199→   199→  colour: string | null;
+   200→   200→  printingOptions: string | null;
+   201→   201→  casePack: number;
+   202→   202→  palletPack: number | null;
+   203→   203→  minOrderQty: number;
+   204→   204→  increment: number;
+   205→   205→  unit: string;
+   206→   206→  stockStatus: string;
+   207→   207→  leadTimeNote: string | null;
+   208→   208→  isActive: boolean;
+   209→   209→  defaultPriceCents: number | null;
+   210→   210→  createdAt: Date;
+   211→   211→  category: { name: string };
+   212→   212→};
+   213→   213→
+   214→   214→export type PriceResolution = {
+   215→   215→  priceCents: number | null;
+   216→   216→  source: "CUSTOMER" | "DEFAULT" | "QUOTE_REQUIRED";
+   217→   217→};
+   218→   218→
+   219→   219→export function serializeProduct(p: ProductRow, price: PriceResolution): ProductListItem {
+   220→   220→  return {
+   221→   221→    id: p.id,
+   222→   222→    sku: p.sku,
+   223→   223→    name: p.name,
+   224→   224→    categoryId: p.categoryId,
+   225→   225→    categoryName: p.category.name,
+   226→   226→    shortDescription: p.shortDescription,
+   227→   227→    dimensions: p.dimensions,
+   228→   228→    material: p.material,
+   229→   229→    colour: p.colour,
+   230→   230→    casePack: p.casePack,
+   231→   231→    unit: p.unit,
+   232→   232→    minOrderQty: p.minOrderQty,
+   233→   233→    increment: p.increment,
+   234→   234→    stockStatus: p.stockStatus,
+   235→   235→    priceCents: price.priceCents,
+   236→   236→    priceSource: price.source,
+   237→   237→  };
+   238→   238→}
+   239→   239→
+   240→   240→export function serializeProductDetail(p: ProductRow, price: PriceResolution): ProductDetail {
+   241→   241→  return {
+   242→   242→    ...serializeProduct(p, price),
+   243→   243→    description: p.description,
+   244→   244→    printingOptions: p.printingOptions,
+   245→   245→    palletPack: p.palletPack,
+   246→   246→    leadTimeNote: p.leadTimeNote,
+   247→   247→    isActive: p.isActive,
+   248→   248→  };
+   249→   249→}
+   250→   250→
+   251→   251→// ─── Orders ───────────────────────────────────────────────────────────────────
+   252→   252→
+   253→   253→export function orderItemSummary(items: { qty: number }[]): {
+   254→   254→  itemCount: number;
+   255→   255→  totalUnits: number;
+   256→   256→  itemSummary: string;
+   257→   257→} {
+   258→   258→  const itemCount = items.length;
+   259→   259→  const totalUnits = items.reduce((sum, i) => sum + i.qty, 0);
+   260→   260→  return {
+   261→   261→    itemCount,
+   262→   262→    totalUnits,
+   263→   263→    itemSummary: `${itemCount} product${itemCount === 1 ? "" : "s"} · ${totalUnits.toLocaleString("en-CA")} units`,
+   264→   264→  };
+   265→   265→}
+   266→   266→
+   267→   267→export type OrderListRow = {
+   268→   268→  id: string;
+   269→   269→  orderNumber: string;
+   270→   270→  status: string;
+   271→   271→  createdAt: Date;
+   272→   272→  updatedAt: Date;
+   273→   273→  totalCents: number;
+   274→   274→  estimatedDelivery: Date | null;
+   275→   275→  nextUpdateDate?: Date | null;
+   276→   276→  sourceType?: string;
+   277→   277→  items: { qty: number }[];
+   278→   278→  organization?: { name: string; code: string } | null;
+   279→   279→  changeRequests?: { status: string }[];
+   280→   280→};
+   281→   281→
+   282→   282→export function serializeOrderListItem(o: OrderListRow): OrderListItem {
+   283→   283→  const pending = (o.changeRequests ?? []).some((c) => c.status === "PENDING");
+   284→   284→  return {
+   285→   285→    id: o.id,
+   286→   286→    orderNumber: o.orderNumber,
+   287→   287→    status: o.status,
+   288→   288→    createdAt: o.createdAt.toISOString(),
+   289→   289→    updatedAt: o.updatedAt.toISOString(),
+   290→   290→    ...orderItemSummary(o.items),
+   291→   291→    totalCents: o.totalCents,
+   292→   292→    estimatedDelivery: o.estimatedDelivery ? o.estimatedDelivery.toISOString() : null,
+   293→   293→    nextUpdateDate: o.nextUpdateDate ? o.nextUpdateDate.toISOString() : null,
+   294→   294→    ...(o.organization ? { orgName: o.organization.name, orgCode: o.organization.code } : {}),
+   295→   295→    ...(o.sourceType ? { sourceType: o.sourceType } : {}),
+   296→   296→    ...(o.changeRequests ? { hasPendingChangeRequest: pending } : {}),
+   297→   297→  };
+   298→   298→}
+   299→   299→
+   300→   300→export type OrderItemRow = {
+   301→   301→  id: string;
+   302→   302→  productId: string | null;
+   303→   303→  sku: string;
+   304→   304→  name: string;
+   305→   305→  qty: number;
+   306→   306→  unitPriceCents: number;
+   307→   307→  lineTotalCents: number;
+   308→   308→  note: string | null;
+   309→   309→  specJson: string | null;
+   310→   310→};
+   311→   311→
+   312→   312→export type DocumentRow = {
+   313→   313→  id: string;
+   314→   314→  category: string;
+   315→   315→  title: string;
+   316→   316→  description: string | null;
+   317→   317→  fileName: string;
+   318→   318→  sizeLabel: string;
+   319→   319→  version: number;
+   320→   320→  uploadedBy: string;
+   321→   321→  createdAt: Date;
+   322→   322→  orgId: string;
+   323→   323→  orderId: string | null;
+   324→   324→  quotationId: string | null;
+   325→   325→  order?: { orderNumber: string } | null;
+   326→   326→  quotation?: { quoteNumber: string } | null;
+   327→   327→  organization?: { name: string } | null;
+   328→   328→};
+   329→   329→
+   330→   330→export function serializeDocument(d: DocumentRow): DocumentDto {
+   331→   331→  return {
+   332→   332→    id: d.id,
+   333→   333→    category: d.category,
+   334→   334→    title: d.title,
+   335→   335→    description: d.description,
+   336→   336→    fileName: d.fileName,
+   337→   337→    sizeLabel: d.sizeLabel,
+   338→   338→    version: d.version,
+   339→   339→    uploadedBy: d.uploadedBy,
+   340→   340→    createdAt: d.createdAt.toISOString(),
+   341→   341→    orgId: d.orgId,
+   342→   342→    ...(d.organization ? { orgName: d.organization.name } : {}),
+   343→   343→    orderId: d.orderId,
+   344→   344→    orderNumber: d.order?.orderNumber ?? null,
+   345→   345→    quotationId: d.quotationId,
+   346→   346→    quoteNumber: d.quotation?.quoteNumber ?? null,
+   347→   347→  };
+   348→   348→}
+   349→   349→
+   350→   350→export type OrderHistoryRow = {
+   351→   351→  id: string;
+   352→   352→  status: string;
+   353→   353→  note: string | null;
+   354→   354→  byName: string | null;
+   355→   355→  createdAt: Date;
+   356→   356→};
+   357→   357→
+   358→   358→export type OrderUpdateRow = {
+   359→   359→  id: string;
+   360→   360→  title: string;
+   361→   361→  category: string;
+   362→   362→  newStatus: string | null;
+   363→   363→  message: string;
+   364→   364→  estimatedDelivery: Date | null;
+   365→   365→  revisedDelivery: Date | null;
+   366→   366→  nextUpdateDate: Date | null;
+   367→   367→  attachmentsJson: string | null;
+   368→   368→  isPublished: boolean;
+   369→   369→  publishedAt: Date | null;
+   370→   370→  createdAt: Date;
+   371→   371→  updatedAt: Date;
+   372→   372→  authorName: string;
+   373→   373→};
+   374→   374→
+   375→   375→export function serializeOrderUpdate(u: OrderUpdateRow): OrderUpdateDto {
+   376→   376→  return {
+   377→   377→    id: u.id,
+   378→   378→    title: u.title,
+   379→   379→    category: u.category,
+   380→   380→    newStatus: u.newStatus,
+   381→   381→    message: u.message,
+   382→   382→    estimatedDelivery: u.estimatedDelivery ? u.estimatedDelivery.toISOString() : null,
+   383→   383→    revisedDelivery: u.revisedDelivery ? u.revisedDelivery.toISOString() : null,
+   384→   384→    nextUpdateDate: u.nextUpdateDate ? u.nextUpdateDate.toISOString() : null,
+   385→   385→    attachments: parseAttachmentsJson(u.attachmentsJson),
+   386→   386→    isPublished: u.isPublished,
+   387→   387→    publishedAt: u.publishedAt ? u.publishedAt.toISOString() : null,
+   388→   388→    createdAt: u.createdAt.toISOString(),
+   389→   389→    updatedAt: u.updatedAt.toISOString(),
+   390→   390→    authorName: u.authorName,
+   391→   391→  };
+   392→   392→}
+   393→   393→
+   394→   394→export type InternalNoteRow = {
+   395→   395→  id: string;
+   396→   396→  body: string;
+   397→   397→  authorName: string;
+   398→   398→  createdAt: Date;
+   399→   399→};
+   400→   400→
+   401→   401→export function serializeInternalNote(n: InternalNoteRow): InternalNoteDto {
+   402→   402→  return {
+   403→   403→    id: n.id,
+   404→   404→    body: n.body,
+   405→   405→    authorName: n.authorName,
+   406→   406→    createdAt: n.createdAt.toISOString(),
+   407→   407→  };
+   408→   408→}
+   409→   409→
+   410→   410→export type ChangeRequestRow = {
+   411→   411→  id: string;
+   412→   412→  status: string;
+   413→   413→  requestNote: string | null;
+   414→   414→  changesJson: string;
+   415→   415→  requestedByName: string;
+   416→   416→  createdAt: Date;
+   417→   417→  adminName: string | null;
+   418→   418→  decisionNote: string | null;
+   419→   419→  decidedAt: Date | null;
+   420→   420→  counterJson: string | null;
+   421→   421→  counterDecision: string | null;
+   422→   422→  counterDecidedAt: Date | null;
+   423→   423→  updatedAt: Date;
+   424→   424→  order?: { id: string; orderNumber: string; organization?: { name: string } | null } | null;
+   425→   425→};
+   426→   426→
+   427→   427→export function serializeChangeRequest(c: ChangeRequestRow): ChangeRequestDto {
+   428→   428→  return {
+   429→   429→    id: c.id,
+   430→   430→    status: c.status,
+   431→   431→    requestNote: c.requestNote,
+   432→   432→    changes: parseChangeItems(c.changesJson),
+   433→   433→    requestedByName: c.requestedByName,
+   434→   434→    createdAt: c.createdAt.toISOString(),
+   435→   435→    adminName: c.adminName,
+   436→   436→    decisionNote: c.decisionNote,
+   437→   437→    decidedAt: c.decidedAt ? c.decidedAt.toISOString() : null,
+   438→   438→    counter: c.counterJson ? parseChangeItems(c.counterJson) : null,
+   439→   439→    counterNote: c.decisionNote, // decision note doubles as the counter explanation
+   440→   440→    counterDecision: c.counterDecision,
+   441→   441→    counterDecidedAt: c.counterDecidedAt ? c.counterDecidedAt.toISOString() : null,
+   442→   442→    appliedAt: c.status === "ACCEPTED" && c.decidedAt ? c.decidedAt.toISOString() : null,
+   443→   443→    orderId: c.order?.id ?? "",
+   444→   444→    orderNumber: c.order?.orderNumber ?? "",
+   445→   445→    ...(c.order?.organization ? { orgName: c.order.organization.name } : {}),
+   446→   446→  };
+   447→   447→}
+   448→   448→
+   449→   449→export type OrderDetailRow = {
+   450→   450→  id: string;
+   451→   451→  orderNumber: string;
+   452→   452→  status: string;
+   453→   453→  orgId: string;
+   454→   454→  createdAt: Date;
+   455→   455→  updatedAt: Date;
+   456→   456→  subtotalCents: number;
+   457→   457→  taxCents: number;
+   458→   458→  taxRateBp: number;
+   459→   459→  totalCents: number;
+   460→   460→  shippingText: string;
+   461→   461→  poNumber: string | null;
+   462→   462→  notes: string | null;
+   463→   463→  requestedDelivery: string | null;
+   464→   464→  estimatedDelivery: Date | null;
+   465→   465→  trackingNumber: string | null;
+   466→   466→  reorderSource: string | null;
+   467→   467→  requestedDeliveryDate: Date | null;
+   468→   468→  estimatedDispatch: Date | null;
+   469→   469→  revisedDeliveryDate: Date | null;
+   470→   470→  nextUpdateDate: Date | null;
+   471→   471→  actualDeliveryDate: Date | null;
+   472→   472→  sourceType: string;
+   473→   473→  recordedByName: string | null;
+   474→   474→  organization: { name: string; code: string };
+   475→   475→  user: { name: string };
+   476→   476→  items: OrderItemRow[];
+   477→   477→  history: OrderHistoryRow[];
+   478→   478→  documents: DocumentRow[];
+   479→   479→  updates: OrderUpdateRow[];
+   480→   480→  changeRequests: ChangeRequestRow[];
+   481→   481→  internalNotes?: InternalNoteRow[];
+   482→   482→};
+   483→   483→
+   484→   484→export function serializeOrderDetail(o: OrderDetailRow, opts?: { includeInternal?: boolean }): OrderDetail {
+   485→   485→  const items: OrderItemDto[] = o.items.map((i) => ({
+   486→   486→    id: i.id,
+   487→   487→    productId: i.productId,
+   488→   488→    sku: i.sku,
+   489→   489→    name: i.name,
+   490→   490→    qty: i.qty,
+   491→   491→    unitPriceCents: i.unitPriceCents,
+   492→   492→    lineTotalCents: i.lineTotalCents,
+   493→   493→    note: i.note,
+   494→   494→    specs: parseSpecJson(i.specJson),
+   495→   495→    attachments: parseAttachmentsJson(i.specJson),
+   496→   496→  }));
+   497→   497→  const history = [...o.history]
+   498→   498→    .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+   499→   499→    .map((h) => ({
+   500→   500→      id: h.id,
+   501→   501→      status: h.status,
+   502→   502→      note: h.note,
+   503→   503→      byName: h.byName,
+   504→   504→      createdAt: h.createdAt.toISOString(),
+   505→   505→    }));
+   506→   506→  const documents = o.documents
+   507→   507→    .map((d) => ({
+   508→   508→      ...serializeDocument(d),
+   509→   509→      // Documents listed inside an order always reference that order.
+   510→   510→      orderNumber: o.orderNumber,
+   511→   511→    }))
+   512→   512→    .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+   513→   513→  const updates = [...o.updates]
+   514→   514→    .sort((a, b) => {
+   515→   515→      const at = (u: OrderUpdateRow) => (u.publishedAt ?? u.createdAt).getTime();
+   516→   516→      return at(b) - at(a);
+   517→   517→    })
+   518→   518→    .map(serializeOrderUpdate);
+   519→   519→  const changeRequests = [...o.changeRequests]
+   520→   520→    .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+   521→   521→    .map((c) => serializeChangeRequest({ ...c, order: { id: o.id, orderNumber: o.orderNumber } }));
+   522→   522→  return {
+   523→   523→    id: o.id,
+   524→   524→    orderNumber: o.orderNumber,
+   525→   525→    status: o.status,
+   526→   526→    orgId: o.orgId,
+   527→   527→    orgName: o.organization.name,
+   528→   528→    orgCode: o.organization.code,
+   529→   529→    submittedBy: o.user.name,
+   530→   530→    createdAt: o.createdAt.toISOString(),
+   531→   531→    updatedAt: o.updatedAt.toISOString(),
+   532→   532→    items,
+   533→   533→    subtotalCents: o.subtotalCents,
+   534→   534→    taxCents: o.taxCents,
+   535→   535→    taxRateBp: o.taxRateBp,
+   536→   536→    totalCents: o.totalCents,
+   537→   537→    shippingText: o.shippingText,
+   538→   538→    poNumber: o.poNumber,
+   539→   539→    notes: o.notes,
+   540→   540→    requestedDelivery: o.requestedDelivery,
+   541→   541→    estimatedDelivery: o.estimatedDelivery ? o.estimatedDelivery.toISOString() : null,
+   542→   542→    trackingNumber: o.trackingNumber,
+   543→   543→    reorderSource: o.reorderSource,
+   544→   544→    requestedDeliveryDate: o.requestedDeliveryDate ? o.requestedDeliveryDate.toISOString() : null,
+   545→   545→    estimatedDispatch: o.estimatedDispatch ? o.estimatedDispatch.toISOString() : null,
+   546→   546→    revisedDeliveryDate: o.revisedDeliveryDate ? o.revisedDeliveryDate.toISOString() : null,
+   547→   547→    nextUpdateDate: o.nextUpdateDate ? o.nextUpdateDate.toISOString() : null,
+   548→   548→    actualDeliveryDate: o.actualDeliveryDate ? o.actualDeliveryDate.toISOString() : null,
+   549→   549→    sourceType: o.sourceType,
+   550→   550→    recordedByName: o.recordedByName,
+   551→   551→    history,
+   552→   552→    documents,
+   553→   553→    updates,
+   554→   554→    changeRequests,
+   555→   555→    ...(opts?.includeInternal
+   556→   556→      ? { internalNotes: [...(o.internalNotes ?? [])].map(serializeInternalNote) }
+   557→   557→      : {}),
+   558→   558→  };
+   559→   559→}
+   560→   560→
+   561→   561→// ─── Quotations ───────────────────────────────────────────────────────────────
+   562→   562→
+   563→   563→export type QuotationListRow = {
+   564→   564→  id: string;
+   565→   565→  quoteNumber: string;
+   566→   566→  status: string;
+   567→   567→  revision: number;
+   568→   568→  title: string;
+   569→   569→  category: string | null;
+   570→   570→  quantity: string | null;
+   571→   571→  itemsTotalCents: number;
+   572→   572→  createdAt: Date;
+   573→   573→  issuedAt: Date | null;
+   574→   574→  expiryDate: Date | null;
+   575→   575→  respondedAt: Date | null;
+   576→   576→  organization?: { name: string } | null;
+   577→   577→};
+   578→   578→
+   579→   579→export function serializeQuotationListItem(q: QuotationListRow): QuotationListItem {
+   580→   580→  return {
+   581→   581→    id: q.id,
+   582→   582→    quoteNumber: q.quoteNumber,
+   583→   583→    status: q.status,
+   584→   584→    revision: q.revision,
+   585→   585→    title: q.title,
+   586→   586→    category: q.category,
+   587→   587→    quantity: q.quantity,
+   588→   588→    itemsTotalCents: q.itemsTotalCents,
+   589→   589→    createdAt: q.createdAt.toISOString(),
+   590→   590→    issuedAt: q.issuedAt ? q.issuedAt.toISOString() : null,
+   591→   591→    expiryDate: q.expiryDate ? q.expiryDate.toISOString() : null,
+   592→   592→    respondedAt: q.respondedAt ? q.respondedAt.toISOString() : null,
+   593→   593→    ...(q.organization ? { orgName: q.organization.name } : {}),
+   594→   594→  };
+   595→   595→}
+   596→   596→
+   597→   597→export type QuotationItemRow = {
+   598→   598→  id: string;
+   599→   599→  description: string;
+   600→   600→  kind: string;
+   601→   601→  qty: number;
+   602→   602→  unitPriceCents: number;
+   603→   603→  lineTotalCents: number;
+   604→   604→};
+   605→   605→
+   606→   606→export type QuotationDetailRow = {
+   607→   607→  id: string;
+   608→   608→  quoteNumber: string;
+   609→   609→  status: string;
+   610→   610→  revision: number;
+   611→   611→  orgId: string;
+   612→   612→  createdAt: Date;
+   613→   613→  issuedAt: Date | null;
+   614→   614→  respondedAt: Date | null;
+   615→   615→  respondedNote: string | null;
+   616→   616→  title: string;
+   617→   617→  category: string | null;
+   618→   618→  productName: string | null;
+   619→   619→  dimensions: string | null;
+   620→   620→  material: string | null;
+   621→   621→  colour: string | null;
+   622→   622→  printing: string | null;
+   623→   623→  quantity: string | null;
+   624→   624→  neededBy: string | null;
+   625→   625→  destination: string | null;
+   626→   626→  specs: string | null;
+   627→   627→  comments: string | null;
+   628→   628→  itemsTotalCents: number;
+   629→   629→  expiryDate: Date | null;
+   630→   630→  terms: string | null;
+   631→   631→  internalNote: string | null;
+   632→   632→  organization: { name: string; code: string };
+   633→   633→  user: { name: string };
+   634→   634→  items: QuotationItemRow[];
+   635→   635→};
+   636→   636→
+   637→   637→export function serializeQuotationDetail(q: QuotationDetailRow): QuotationDetail {
+   638→   638→  const items: QuotationItemDto[] = q.items.map((i) => ({
+   639→   639→    id: i.id,
+   640→   640→    description: i.description,
+   641→   641→    kind: i.kind,
+   642→   642→    qty: i.qty,
+   643→   643→    unitPriceCents: i.unitPriceCents,
+   644→   644→    lineTotalCents: i.lineTotalCents,
+   645→   645→  }));
+   646→   646→  return {
+   647→   647→    id: q.id,
+   648→   648→    quoteNumber: q.quoteNumber,
+   649→   649→    status: q.status,
+   650→   650→    revision: q.revision,
+   651→   651→    orgId: q.orgId,
+   652→   652→    orgName: q.organization.name,
+   653→   653→    orgCode: q.organization.code,
+   654→   654→    requestedBy: q.user.name,
+   655→   655→    createdAt: q.createdAt.toISOString(),
+   656→   656→    issuedAt: q.issuedAt ? q.issuedAt.toISOString() : null,
+   657→   657→    respondedAt: q.respondedAt ? q.respondedAt.toISOString() : null,
+   658→   658→    respondedNote: q.respondedNote,
+   659→   659→    title: q.title,
+   660→   660→    category: q.category,
+   661→   661→    productName: q.productName,
+   662→   662→    dimensions: q.dimensions,
+   663→   663→    material: q.material,
+   664→   664→    colour: q.colour,
+   665→   665→    printing: q.printing,
+   666→   666→    quantity: q.quantity,
+   667→   667→    neededBy: q.neededBy,
+   668→   668→    destination: q.destination,
+   669→   669→    specs: q.specs,
+   670→   670→    comments: q.comments,
+   671→   671→    itemsTotalCents: q.itemsTotalCents,
+   672→   672→    expiryDate: q.expiryDate ? q.expiryDate.toISOString() : null,
+   673→   673→    terms: q.terms,
+   674→   674→    internalNote: q.internalNote,
+   675→   675→    items,
+   676→   676→  };
+   677→   677→}
+   678→   678→
+   679→   679→// ─── Notifications & messages ─────────────────────────────────────────────────
+   680→   680→
+   681→   681→export function serializeNotification(n: {
+   682→   682→  id: string;
+   683→   683→  audience: string;
+   684→   684→  title: string;
+   685→   685→  body: string;
+   686→   686→  kind: string;
+   687→   687→  view: string | null;
+   688→   688→  relatedId: string | null;
+   689→   689→  isRead: boolean;
+   690→   690→  createdAt: Date;
+   691→   691→}): NotificationDto {
+   692→   692→  return {
+   693→   693→    id: n.id,
+   694→   694→    audience: n.audience,
+   695→   695→    title: n.title,
+   696→   696→    body: n.body,
+   697→   697→    kind: n.kind,
+   698→   698→    view: n.view,
+   699→   699→    relatedId: n.relatedId,
+   700→   700→    isRead: n.isRead,
+   701→   701→    createdAt: n.createdAt.toISOString(),
+   702→   702→  };
+   703→   703→}
+   704→   704→
+   705→   705→export type MessageRow = {
+   706→   706→  id: string;
+   707→   707→  subject: string;
+   708→   708→  category: string;
+   709→   709→  body: string;
+   710→   710→  status: string;
+   711→   711→  reply: string | null;
+   712→   712→  repliedAt: Date | null;
+   713→   713→  repliedBy: string | null;
+   714→   714→  createdAt: Date;
+   715→   715→  orderId: string | null;
+   716→   716→  order?: { orderNumber: string } | null;
+   717→   717→  user: { name: string };
+   718→   718→  organization?: { name: string } | null;
+   719→   719→};
+   720→   720→
+   721→   721→export function serializeMessage(m: MessageRow): MessageDto {
+   722→   722→  return {
+   723→   723→    id: m.id,
+   724→   724→    subject: m.subject,
+   725→   725→    category: m.category,
+   726→   726→    body: m.body,
+   727→   727→    status: m.status,
+   728→   728→    reply: m.reply,
+   729→   729→    repliedAt: m.repliedAt ? m.repliedAt.toISOString() : null,
+   730→   730→    repliedBy: m.repliedBy,
+   731→   731→    createdAt: m.createdAt.toISOString(),
+   732→   732→    orderId: m.orderId,
+   733→   733→    orderNumber: m.order?.orderNumber ?? null,
+   734→   734→    authorName: m.user.name,
+   735→   735→    ...(m.organization ? { orgName: m.organization.name } : {}),
+   736→   736→  };
+   737→   737→}
+   738→   738→
+   739→   739→// ─── Update templates ─────────────────────────────────────────────────────────
+   740→   740→
+   741→   741→export type UpdateTemplateRow = {
+   742→   742→  id: string;
+   743→   743→  title: string;
+   744→   744→  category: string;
+   745→   745→  body: string;
+   746→   746→  isDefault: boolean;
+   747→   747→  createdByName: string | null;
+   748→   748→  createdAt: Date;
+   749→   749→  updatedAt: Date;
+   750→   750→};
+   751→   751→
+   752→   752→export function serializeTemplate(t: UpdateTemplateRow): UpdateTemplateDto {
+   753→   753→  return {
+   754→   754→    id: t.id,
+   755→   755→    title: t.title,
+   756→   756→    category: t.category,
+   757→   757→    body: t.body,
+   758→   758→    isDefault: t.isDefault,
+   759→   759→    createdByName: t.createdByName,
+   760→   760→    createdAt: t.createdAt.toISOString(),
+   761→   761→    updatedAt: t.updatedAt.toISOString(),
+   762→   762→  };
+   763→   763→}
+   764→   764→
+   765→   765→// ─── Saved products ──────────────────────────────────────────────────────────
+   766→   766→
+   767→   767→export type SavedProductRow = {
+   768→   768→  id: string;
+   769→   769→  productId: string;
+   770→   770→  qty: number;
+   771→   771→  note: string | null;
+   772→   772→  createdAt: Date;
+   773→   773→  product: {
+   774→   774→    sku: string;
+   775→   775→    name: string;
+   776→   776→    unit: string;
+   777→   777→    minOrderQty: number;
+   778→   778→    increment: number;
+   779→   779→    casePack: number;
+   780→   780→    stockStatus: string;
+   781→   781→    isActive: boolean;
+   782→   782→    defaultPriceCents: number | null;
+   783→   783→  };
+   784→   784→};
+   785→   785→
+   786→   786→export type SavedPriceResolution = {
+   787→   787→  priceCents: number | null;
+   788→   788→  source: "CUSTOMER" | "DEFAULT" | "QUOTE_REQUIRED";
+   789→   789→};
+   790→   790→
+   791→   791→export function serializeSavedProduct(
+   792→   792→  s: SavedProductRow,
+   793→   793→  price: SavedPriceResolution,
+   794→   794→  approved: boolean,
+   795→   795→): SavedProductDto {
+   796→   796→  return {
+   797→   797→    id: s.id,
+   798→   798→    productId: s.productId,
+   799→   799→    sku: s.product.sku,
+   800→   800→    name: s.product.name,
+   801→   801→    qty: s.qty,
+   802→   802→    note: s.note,
+   803→   803→    priceCents: price.priceCents,
+   804→   804→    priceSource: price.source,
+   805→   805→    stockStatus: s.product.stockStatus,
+   806→   806→    available: approved && s.product.isActive,
+   807→   807→    unit: s.product.unit,
+   808→   808→    minOrderQty: s.product.minOrderQty,
+   809→   809→    increment: s.product.increment,
+   810→   810→    casePack: s.product.casePack,
+   811→   811→    createdAt: s.createdAt.toISOString(),
+   812→   812→  };
+   813→   813→}
+   814→   814→
+   815→   815→// ─── Order drafts ────────────────────────────────────────────────────────────
+   816→   816→
+   817→   817→export type OrderDraftRow = {
+   818→   818→  id: string;
+   819→   819→  name: string;
+   820→   820→  payload: string;
+   821→   821→  createdAt: Date;
+   822→   822→  updatedAt: Date;
+   823→   823→};
+   824→   824→
+   825→   825→export function serializeDraft(d: OrderDraftRow): OrderDraftDto {
+   826→   826→  let payload: OrderDraftPayload = { lines: [], delivery: { addressId: null, requestedDeliveryDate: null, notes: null }, reference: { poNumber: null, specialInstructions: null }, attachments: [] };
+   827→   827→  try {
+   828→   828→    const parsed: unknown = JSON.parse(d.payload);
+   829→   829→    if (parsed !== null && typeof parsed === "object" && Array.isArray((parsed as OrderDraftPayload).lines)) {
+   830→   830→      payload = parsed as OrderDraftPayload;
+   831→   831→    }
+   832→   832→  } catch {
+   833→   833→    // keep empty payload
+   834→   834→  }
+   835→   835→  return {
+   836→   836→    id: d.id,
+   837→   837→    name: d.name,
+   838→   838→    payload,
+   839→   839→    lineCount: payload.lines.length,
+   840→   840→    createdAt: d.createdAt.toISOString(),
+   841→   841→    updatedAt: d.updatedAt.toISOString(),
+   842→   842→  };
+   843→   843→}
+   844→   844→
+   845→   845→// ─── Addresses ────────────────────────────────────────────────────────────────
+   846→   846→
+   847→   847→export type AddressRow = {
+   848→   848→  id: string;
+   849→   849→  label: string;
+   850→   850→  line1: string;
+   851→   851→  line2: string | null;
+   852→   852→  city: string;
+   853→   853→  province: string;
+   854→   854→  postal: string;
+   855→   855→  isDefault: boolean;
+   856→   856→  approvalStatus: string;
+   857→   857→  requestedByName: string | null;
+   858→   858→  requestedAt: Date | null;
+   859→   859→  reviewNote: string | null;
+   860→   860→};
+   861→   861→
+   862→   862→export function serializeAddress(a: AddressRow): AddressDto {
+   863→   863→  return {
+   864→   864→    id: a.id,
+   865→   865→    label: a.label,
+   866→   866→    line1: a.line1,
+   867→   867→    line2: a.line2,
+   868→   868→    city: a.city,
+   869→   869→    province: a.province,
+   870→   870→    postal: a.postal,
+   871→   871→    isDefault: a.isDefault,
+   872→   872→    approvalStatus: a.approvalStatus,
+   873→   873→    requestedByName: a.requestedByName,
+   874→   874→    requestedAt: a.requestedAt ? a.requestedAt.toISOString() : null,
+   875→   875→    reviewNote: a.reviewNote,
+   876→   876→  };
+   877→   877→}
+   878→   878→

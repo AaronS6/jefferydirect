@@ -1,0 +1,742 @@
+     1→     1→"use client";
+     2→     2→
+     3→     3→// Administration — product catalogue management: search + category filter,
+     4→     4→// create/edit product dialogs (the edit dialog IS the detail editor) and
+     5→     5→// archive toggles.
+     6→     6→
+     7→     7→import { useState } from "react";
+     8→     8→import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+     9→     9→import {
+    10→    10→  Archive,
+    11→    11→  ArchiveRestore,
+    12→    12→  Package,
+    13→    13→  PencilLine,
+    14→    14→  Plus,
+    15→    15→  X,
+    16→    16→} from "lucide-react";
+    17→    17→import { Button } from "@/components/ui/button";
+    18→    18→import { Input } from "@/components/ui/input";
+    19→    19→import { Label } from "@/components/ui/label";
+    20→    20→import { Textarea } from "@/components/ui/textarea";
+    21→    21→import {
+    22→    22→  Select,
+    23→    23→  SelectContent,
+    24→    24→  SelectItem,
+    25→    25→  SelectTrigger,
+    26→    26→  SelectValue,
+    27→    27→} from "@/components/ui/select";
+    28→    28→import {
+    29→    29→  AlertDialog,
+    30→    30→  AlertDialogAction,
+    31→    31→  AlertDialogCancel,
+    32→    32→  AlertDialogContent,
+    33→    33→  AlertDialogDescription,
+    34→    34→  AlertDialogFooter,
+    35→    35→  AlertDialogHeader,
+    36→    36→  AlertDialogTitle,
+    37→    37→  AlertDialogTrigger,
+    38→    38→} from "@/components/ui/alert-dialog";
+    39→    39→import { Table, TableBody, TableHeader, TableRow } from "@/components/ui/table";
+    40→    40→import {
+    41→    41→  Dialog,
+    42→    42→  DialogContent,
+    43→    43→  DialogDescription,
+    44→    44→  DialogFooter,
+    45→    45→  DialogHeader,
+    46→    46→  DialogTitle,
+    47→    47→} from "@/components/ui/dialog";
+    48→    48→import { PageHeader } from "@/components/shared/page-header";
+    49→    49→import { Money } from "@/components/shared/money";
+    50→    50→import { StockBadge } from "@/components/shared/status-badge";
+    51→    51→import { ProductArtwork } from "@/components/shared/product-artwork";
+    52→    52→import { EmptyState } from "@/components/shared/empty-state";
+    53→    53→import { api } from "@/lib/api-client";
+    54→    54→import { centsToInputValue, parseDollarsToCents } from "@/lib/money";
+    55→    55→import { STOCK_STATUSES, STOCK_STATUS_LABELS } from "@/lib/constants";
+    56→    56→import { toast } from "@/hooks/use-toast";
+    57→    57→import type { AdminProduct, CategoryDto } from "@/types";
+    58→    58→import {
+    59→    59→  FieldError,
+    60→    60→  GroupLabel,
+    61→    61→  InlineError,
+    62→    62→  RowsSkeleton,
+    63→    63→  SearchField,
+    64→    64→  SectionCard,
+    65→    65→  Td,
+    66→    66→  Th,
+    67→    67→  Toolbar,
+    68→    68→  useDebouncedValue,
+    69→    69→} from "./admin-ui";
+    70→    70→
+    71→    71→const ALL = "ALL";
+    72→    72→const UNITS = ["each", "case"] as const;
+    73→    73→
+    74→    74→type ProductForm = {
+    75→    75→  sku: string;
+    76→    76→  name: string;
+    77→    77→  categoryId: string;
+    78→    78→  shortDescription: string;
+    79→    79→  description: string;
+    80→    80→  material: string;
+    81→    81→  dimensions: string;
+    82→    82→  colour: string;
+    83→    83→  printingOptions: string;
+    84→    84→  casePack: string;
+    85→    85→  palletPack: string;
+    86→    86→  minOrderQty: string;
+    87→    87→  increment: string;
+    88→    88→  unit: string;
+    89→    89→  defaultPrice: string;
+    90→    90→  stockStatus: string;
+    91→    91→  leadTimeNote: string;
+    92→    92→};
+    93→    93→
+    94→    94→const EMPTY_PRODUCT_FORM: ProductForm = {
+    95→    95→  sku: "",
+    96→    96→  name: "",
+    97→    97→  categoryId: "",
+    98→    98→  shortDescription: "",
+    99→    99→  description: "",
+   100→   100→  material: "",
+   101→   101→  dimensions: "",
+   102→   102→  colour: "",
+   103→   103→  printingOptions: "",
+   104→   104→  casePack: "100",
+   105→   105→  palletPack: "",
+   106→   106→  minOrderQty: "500",
+   107→   107→  increment: "100",
+   108→   108→  unit: "each",
+   109→   109→  defaultPrice: "",
+   110→   110→  stockStatus: "IN_STOCK",
+   111→   111→  leadTimeNote: "",
+   112→   112→};
+   113→   113→
+   114→   114→export function AdminProductsView() {
+   115→   115→  const [search, setSearch] = useState("");
+   116→   116→  const [category, setCategory] = useState<string>(ALL);
+   117→   117→  const [createOpen, setCreateOpen] = useState(false);
+   118→   118→  const [editing, setEditing] = useState<AdminProduct | null>(null);
+   119→   119→  const debouncedSearch = useDebouncedValue(search);
+   120→   120→
+   121→   121→  const { data: categories } = useQuery({
+   122→   122→    queryKey: ["admin", "settings"],
+   123→   123→    queryFn: () => api.get<{ categories: CategoryDto[] }>("/api/admin/settings"),
+   124→   124→  });
+   125→   125→
+   126→   126→  const params = new URLSearchParams();
+   127→   127→  if (debouncedSearch.trim()) params.set("search", debouncedSearch.trim());
+   128→   128→  if (category !== ALL) params.set("category", category);
+   129→   129→  const qs = params.toString();
+   130→   130→
+   131→   131→  const { data, isLoading, isError, error } = useQuery({
+   132→   132→    queryKey: ["admin", "products", { search: debouncedSearch.trim(), category }],
+   133→   133→    queryFn: () => api.get<AdminProduct[]>(`/api/admin/products${qs ? `?${qs}` : ""}`),
+   134→   134→  });
+   135→   135→
+   136→   136→  const queryClient = useQueryClient();
+   137→   137→  const archive = useMutation({
+   138→   138→    mutationFn: (payload: { id: string; archive: boolean; sku: string }) =>
+   139→   139→      api.post<{ ok: boolean }>(`/api/admin/products/${payload.id}/archive`, { archive: payload.archive }),
+   140→   140→    onSuccess: (_res, payload) => {
+   141→   141→      queryClient.invalidateQueries({ queryKey: ["admin", "products"] });
+   142→   142→      toast({
+   143→   143→        title: payload.archive ? "Product archived" : "Product restored",
+   144→   144→        description: payload.archive
+   145→   145→          ? `${payload.sku} is hidden from the active catalogue and can be restored at any time.`
+   146→   146→          : `${payload.sku} is active again and visible to approved customers.`,
+   147→   147→      });
+   148→   148→    },
+   149→   149→    onError: (err: Error) => toast({ title: "Could not archive product.", description: err.message }),
+   150→   150→  });
+   151→   151→
+   152→   152→  const products = data ?? [];
+   153→   153→  const filtersActive = search.trim() !== "" || category !== ALL;
+   154→   154→  const categoryList = categories?.categories ?? [];
+   155→   155→
+   156→   156→  return (
+   157→   157→    <div>
+   158→   158→      <PageHeader
+   159→   159→        eyebrow="Administration"
+   160→   160→        title="Products"
+   161→   161→        description="The Jeffery Group catalogue — pricing defaults, stock availability, order rules and customer approvals."
+   162→   162→        actions={
+   163→   163→          <Button className="gap-1.5" onClick={() => setCreateOpen(true)}>
+   164→   164→            <Plus className="size-4" aria-hidden />
+   165→   165→            New product
+   166→   166→          </Button>
+   167→   167→        }
+   168→   168→      />
+   169→   169→
+   170→   170→      <Toolbar>
+   171→   171→        <Select value={category} onValueChange={setCategory}>
+   172→   172→          <SelectTrigger size="sm" className="h-9 w-full sm:w-[240px] text-[13px]" aria-label="Filter by category">
+   173→   173→            <SelectValue placeholder="All categories" />
+   174→   174→          </SelectTrigger>
+   175→   175→          <SelectContent>
+   176→   176→            <SelectItem value={ALL}>All categories</SelectItem>
+   177→   177→            {categoryList.map((c) => (
+   178→   178→              <SelectItem key={c.id} value={c.id}>
+   179→   179→                {c.name}
+   180→   180→              </SelectItem>
+   181→   181→            ))}
+   182→   182→          </SelectContent>
+   183→   183→        </Select>
+   184→   184→
+   185→   185→        <SearchField
+   186→   186→          value={search}
+   187→   187→          onChange={setSearch}
+   188→   188→          placeholder="Search name or SKU…"
+   189→   189→          ariaLabel="Search products"
+   190→   190→          className="sm:max-w-[280px]"
+   191→   191→        />
+   192→   192→
+   193→   193→        <div className="ml-auto flex items-center gap-2">
+   194→   194→          {products.length > 0 && (
+   195→   195→            <p className="whitespace-nowrap text-[12.5px] text-muted-foreground tnum">
+   196→   196→              {products.length} {products.length === 1 ? "product" : "products"}
+   197→   197→            </p>
+   198→   198→          )}
+   199→   199→          {filtersActive && (
+   200→   200→            <Button
+   201→   201→              variant="ghost"
+   202→   202→              size="sm"
+   203→   203→              className="h-8 gap-1.5 px-2 text-[12.5px] text-muted-foreground"
+   204→   204→              onClick={() => {
+   205→   205→                setSearch("");
+   206→   206→                setCategory(ALL);
+   207→   207→              }}
+   208→   208→            >
+   209→   209→              <X className="size-3.5" aria-hidden />
+   210→   210→              Clear
+   211→   211→            </Button>
+   212→   212→          )}
+   213→   213→        </div>
+   214→   214→      </Toolbar>
+   215→   215→
+   216→   216→      {isError ? (
+   217→   217→        <InlineError message={error instanceof Error ? error.message : "Could not load products."} />
+   218→   218→      ) : isLoading ? (
+   219→   219→        <SectionCard>
+   220→   220→          <RowsSkeleton rows={7} />
+   221→   221→        </SectionCard>
+   222→   222→      ) : products.length === 0 ? (
+   223→   223→        <EmptyState
+   224→   224→          icon={Package}
+   225→   225→          title="No products match these filters"
+   226→   226→          description={
+   227→   227→            filtersActive
+   228→   228→              ? "Try clearing the category or search filters to see the full catalogue."
+   229→   229→              : "Add the first product to start building the Jeffery Group catalogue."
+   230→   230→          }
+   231→   231→          action={
+   232→   232→            filtersActive ? (
+   233→   233→              <Button
+   234→   234→                variant="outline"
+   235→   235→                onClick={() => {
+   236→   236→                  setSearch("");
+   237→   237→                  setCategory(ALL);
+   238→   238→                }}
+   239→   239→              >
+   240→   240→                Clear filters
+   241→   241→              </Button>
+   242→   242→            ) : undefined
+   243→   243→          }
+   244→   244→        />
+   245→   245→      ) : (
+   246→   246→        <SectionCard bodyClassName="p-0 sm:p-0">
+   247→   247→          {/* Desktop table */}
+   248→   248→          <div className="hidden overflow-x-auto md:block">
+   249→   249→            <Table className="min-w-[980px]">
+   250→   250→              <TableHeader>
+   251→   251→                <TableRow>
+   252→   252→                  <Th>Product</Th>
+   253→   253→                  <Th>SKU</Th>
+   254→   254→                  <Th>Category</Th>
+   255→   255→                  <Th className="text-right">Default price</Th>
+   256→   256→                  <Th>Stock</Th>
+   257→   257→                  <Th>MOQ / Increment</Th>
+   258→   258→                  <Th className="text-right">Customers</Th>
+   259→   259→                  <Th>Status</Th>
+   260→   260→                  <Th className="text-right">Actions</Th>
+   261→   261→                </TableRow>
+   262→   262→              </TableHeader>
+   263→   263→              <TableBody>
+   264→   264→                {products.map((p) => (
+   265→   265→                  <TableRow key={p.id}>
+   266→   266→                    <Td className="max-w-[260px] whitespace-normal">
+   267→   267→                      <div className="flex items-center gap-3">
+   268→   268→                        <ProductArtwork sku={p.sku} compact className="h-10 w-10 shrink-0 p-1.5" />
+   269→   269→                        <div className="min-w-0">
+   270→   270→                          <p className="truncate font-medium">{p.name}</p>
+   271→   271→                          <p className="truncate text-[11.5px] text-muted-foreground">{p.shortDescription}</p>
+   272→   272→                        </div>
+   273→   273→                      </div>
+   274→   274→                    </Td>
+   275→   275→                    <Td>
+   276→   276→                      <span className="font-mono text-[12px]">{p.sku}</span>
+   277→   277→                    </Td>
+   278→   278→                    <Td className="text-muted-foreground">{p.categoryName}</Td>
+   279→   279→                    <Td className="text-right">
+   280→   280→                      {p.defaultPriceCents !== null ? (
+   281→   281→                        <Money cents={p.defaultPriceCents} />
+   282→   282→                      ) : (
+   283→   283→                        <span className="text-[12px] text-muted-foreground">Quote</span>
+   284→   284→                      )}
+   285→   285→                    </Td>
+   286→   286→                    <Td>
+   287→   287→                      <StockBadge status={p.stockStatus} />
+   288→   288→                    </Td>
+   289→   289→                    <Td className="whitespace-nowrap text-muted-foreground">
+   290→   290→                      <span className="tnum">{p.minOrderQty.toLocaleString()}</span> /{" "}
+   291→   291→                      <span className="tnum">+{p.increment.toLocaleString()}</span>
+   292→   292→                    </Td>
+   293→   293→                    <Td className="tnum text-right text-muted-foreground">
+   294→   294→                      <span title="Approved customers">{p.approvedOrgCount}</span>
+   295→   295→                      {p.customPriceCount > 0 && (
+   296→   296→                        <span className="ml-1.5 text-[11px] text-amber-700" title="Customers with custom pricing">
+   297→   297→                          · {p.customPriceCount} custom
+   298→   298→                        </span>
+   299→   299→                      )}
+   300→   300→                    </Td>
+   301→   301→                    <Td>
+   302→   302→                      {p.isActive ? (
+   303→   303→                        <span className="inline-flex items-center gap-1.5 rounded-md border border-emerald-200/70 bg-emerald-50 px-2 py-0.5 text-[11.5px] font-medium text-emerald-700">
+   304→   304→                          <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" aria-hidden />
+   305→   305→                          Active
+   306→   306→                        </span>
+   307→   307→                      ) : (
+   308→   308→                        <span className="inline-flex items-center gap-1.5 rounded-md border border-border bg-muted px-2 py-0.5 text-[11.5px] font-medium text-muted-foreground">
+   309→   309→                          <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" aria-hidden />
+   310→   310→                          Archived
+   311→   311→                        </span>
+   312→   312→                      )}
+   313→   313→                    </Td>
+   314→   314→                    <Td>
+   315→   315→                      <div className="flex items-center justify-end gap-1">
+   316→   316→                        <Button
+   317→   317→                          variant="ghost"
+   318→   318→                          size="icon"
+   319→   319→                          className="size-7 text-muted-foreground hover:text-foreground"
+   320→   320→                          aria-label={`Edit ${p.name}`}
+   321→   321→                          onClick={() => setEditing(p)}
+   322→   322→                        >
+   323→   323→                          <PencilLine className="size-3.5" aria-hidden />
+   324→   324→                        </Button>
+   325→   325→                        {p.isActive ? (
+   326→   326→                          <AlertDialog>
+   327→   327→                            <AlertDialogTrigger asChild>
+   328→   328→                              <Button
+   329→   329→                                variant="ghost"
+   330→   330→                                size="icon"
+   331→   331→                                className="size-7 text-muted-foreground hover:text-red-600"
+   332→   332→                                aria-label={`Archive ${p.name}`}
+   333→   333→                              >
+   334→   334→                                <Archive className="size-3.5" aria-hidden />
+   335→   335→                              </Button>
+   336→   336→                            </AlertDialogTrigger>
+   337→   337→                            <AlertDialogContent>
+   338→   338→                              <AlertDialogHeader>
+   339→   339→                                <AlertDialogTitle>Archive {p.name}?</AlertDialogTitle>
+   340→   340→                                <AlertDialogDescription className="leading-relaxed">
+   341→   341→                                  The product disappears from active catalogues and new orders, but existing orders,
+   342→   342→                                  documents and custom pricing are preserved. You can restore it at any time.
+   343→   343→                                </AlertDialogDescription>
+   344→   344→                              </AlertDialogHeader>
+   345→   345→                              <AlertDialogFooter>
+   346→   346→                                <AlertDialogCancel>Keep active</AlertDialogCancel>
+   347→   347→                                <AlertDialogAction
+   348→   348→                                  className="bg-red-600 text-white hover:bg-red-700"
+   349→   349→                                  disabled={archive.isPending}
+   350→   350→                                  onClick={() => archive.mutate({ id: p.id, archive: true, sku: p.sku })}
+   351→   351→                                >
+   352→   352→                                  Yes, archive product
+   353→   353→                                </AlertDialogAction>
+   354→   354→                              </AlertDialogFooter>
+   355→   355→                            </AlertDialogContent>
+   356→   356→                          </AlertDialog>
+   357→   357→                        ) : (
+   358→   358→                          <Button
+   359→   359→                            variant="ghost"
+   360→   360→                            size="icon"
+   361→   361→                            className="size-7 text-muted-foreground hover:text-emerald-600"
+   362→   362→                            aria-label={`Restore ${p.name}`}
+   363→   363→                            disabled={archive.isPending}
+   364→   364→                            onClick={() => archive.mutate({ id: p.id, archive: false, sku: p.sku })}
+   365→   365→                          >
+   366→   366→                            <ArchiveRestore className="size-3.5" aria-hidden />
+   367→   367→                          </Button>
+   368→   368→                        )}
+   369→   369→                      </div>
+   370→   370→                    </Td>
+   371→   371→                  </TableRow>
+   372→   372→                ))}
+   373→   373→              </TableBody>
+   374→   374→            </Table>
+   375→   375→          </div>
+   376→   376→
+   377→   377→          {/* Mobile stacked cards */}
+   378→   378→          <ul className="space-y-3 p-4 md:hidden">
+   379→   379→            {products.map((p) => (
+   380→   380→              <li key={p.id} className="rounded-lg border bg-card p-4">
+   381→   381→                <div className="flex items-start gap-3">
+   382→   382→                  <ProductArtwork sku={p.sku} compact className="h-12 w-12 shrink-0 p-1.5" />
+   383→   383→                  <div className="min-w-0 flex-1">
+   384→   384→                    <p className="truncate text-[13.5px] font-medium">{p.name}</p>
+   385→   385→                    <p className="font-mono text-[11px] text-muted-foreground">
+   386→   386→                      {p.sku} · {p.categoryName}
+   387→   387→                    </p>
+   388→   388→                  </div>
+   389→   389→                  {p.isActive ? <StockBadge status={p.stockStatus} /> : null}
+   390→   390→                </div>
+   391→   391→                <div className="mt-3 flex items-center justify-between border-t pt-2.5 text-[12px] text-muted-foreground">
+   392→   392→                  <span>
+   393→   393→                    {p.defaultPriceCents !== null ? <Money cents={p.defaultPriceCents} /> : "Quote required"}
+   394→   394→                    {` · MOQ ${p.minOrderQty.toLocaleString()}`}
+   395→   395→                  </span>
+   396→   396→                  <span>{p.approvedOrgCount} customers</span>
+   397→   397→                </div>
+   398→   398→                <div className="mt-3 flex justify-end gap-1.5">
+   399→   399→                  <Button
+   400→   400→                    variant="outline"
+   401→   401→                    size="sm"
+   402→   402→                    className="h-8 gap-1.5 text-[12.5px]"
+   403→   403→                    onClick={() => setEditing(p)}
+   404→   404→                  >
+   405→   405→                    <PencilLine className="size-3.5" aria-hidden /> Edit
+   406→   406→                  </Button>
+   407→   407→                  {p.isActive ? (
+   408→   408→                    <AlertDialog>
+   409→   409→                      <AlertDialogTrigger asChild>
+   410→   410→                        <Button variant="outline" size="sm" className="h-8 gap-1.5 text-[12.5px] text-red-700">
+   411→   411→                          <Archive className="size-3.5" aria-hidden /> Archive
+   412→   412→                        </Button>
+   413→   413→                      </AlertDialogTrigger>
+   414→   414→                      <AlertDialogContent>
+   415→   415→                        <AlertDialogHeader>
+   416→   416→                          <AlertDialogTitle>Archive {p.name}?</AlertDialogTitle>
+   417→   417→                          <AlertDialogDescription className="leading-relaxed">
+   418→   418→                            The product disappears from active catalogues and new orders. Existing data is preserved and
+   419→   419→                            you can restore it at any time.
+   420→   420→                          </AlertDialogDescription>
+   421→   421→                        </AlertDialogHeader>
+   422→   422→                        <AlertDialogFooter>
+   423→   423→                          <AlertDialogCancel>Keep active</AlertDialogCancel>
+   424→   424→                          <AlertDialogAction
+   425→   425→                            className="bg-red-600 text-white hover:bg-red-700"
+   426→   426→                            onClick={() => archive.mutate({ id: p.id, archive: true, sku: p.sku })}
+   427→   427→                          >
+   428→   428→                            Yes, archive
+   429→   429→                          </AlertDialogAction>
+   430→   430→                        </AlertDialogFooter>
+   431→   431→                      </AlertDialogContent>
+   432→   432→                    </AlertDialog>
+   433→   433→                  ) : (
+   434→   434→                    <Button
+   435→   435→                      variant="outline"
+   436→   436→                      size="sm"
+   437→   437→                      className="h-8 gap-1.5 text-[12.5px] text-emerald-700"
+   438→   438→                      onClick={() => archive.mutate({ id: p.id, archive: false, sku: p.sku })}
+   439→   439→                    >
+   440→   440→                      <ArchiveRestore className="size-3.5" aria-hidden /> Restore
+   441→   441→                    </Button>
+   442→   442→                  )}
+   443→   443→                </div>
+   444→   444→              </li>
+   445→   445→            ))}
+   446→   446→          </ul>
+   447→   447→        </SectionCard>
+   448→   448→      )}
+   449→   449→
+   450→   450→      {/* Create / edit dialogs */}
+   451→   451→      {categoryList.length > 0 && (
+   452→   452→        <ProductDialog
+   453→   453→          key="create"
+   454→   454→          categories={categoryList}
+   455→   455→          open={createOpen}
+   456→   456→          onOpenChange={setCreateOpen}
+   457→   457→        />
+   458→   458→      )}
+   459→   459→      {editing && (
+   460→   460→        <ProductDialog
+   461→   461→          key={`edit-${editing.id}`}
+   462→   462→          categories={categoryList}
+   463→   463→          product={editing}
+   464→   464→          open={editing !== null}
+   465→   465→          onOpenChange={(v) => {
+   466→   466→            if (!v) setEditing(null);
+   467→   467→          }}
+   468→   468→        />
+   469→   469→      )}
+   470→   470→    </div>
+   471→   471→  );
+   472→   472→}
+   473→   473→
+   474→   474→// ─── Product create / edit dialog ─────────────────────────────────────
+   475→   475→
+   476→   476→function ProductDialog({
+   477→   477→  categories,
+   478→   478→  product,
+   479→   479→  open,
+   480→   480→  onOpenChange,
+   481→   481→}: {
+   482→   482→  categories: CategoryDto[];
+   483→   483→  product?: AdminProduct;
+   484→   484→  open: boolean;
+   485→   485→  onOpenChange: (v: boolean) => void;
+   486→   486→}) {
+   487→   487→  const queryClient = useQueryClient();
+   488→   488→  const isEdit = Boolean(product);
+   489→   489→
+   490→   490→  const [form, setForm] = useState<ProductForm>(() =>
+   491→   491→    product
+   492→   492→      ? {
+   493→   493→          sku: product.sku,
+   494→   494→          name: product.name,
+   495→   495→          categoryId: product.categoryId,
+   496→   496→          shortDescription: product.shortDescription,
+   497→   497→          description: product.description,
+   498→   498→          material: product.material ?? "",
+   499→   499→          dimensions: product.dimensions ?? "",
+   500→   500→          colour: product.colour ?? "",
+   501→   501→          printingOptions: product.printingOptions ?? "",
+   502→   502→          casePack: String(product.casePack),
+   503→   503→          palletPack: product.palletPack != null ? String(product.palletPack) : "",
+   504→   504→          minOrderQty: String(product.minOrderQty),
+   505→   505→          increment: String(product.increment),
+   506→   506→          unit: product.unit,
+   507→   507→          defaultPrice: product.defaultPriceCents != null ? centsToInputValue(product.defaultPriceCents) : "",
+   508→   508→          stockStatus: product.stockStatus,
+   509→   509→          leadTimeNote: product.leadTimeNote ?? "",
+   510→   510→        }
+   511→   511→      : { ...EMPTY_PRODUCT_FORM },
+   512→   512→  );
+   513→   513→  const [submitError, setSubmitError] = useState<string | null>(null);
+   514→   514→
+   515→   515→  const parsedPrice = form.defaultPrice.trim() === "" ? null : parseDollarsToCents(form.defaultPrice);
+   516→   516→  const priceInvalid = form.defaultPrice.trim() !== "" && parsedPrice === null;
+   517→   517→
+   518→   518→  const save = useMutation<{ ok: boolean } | { id: string }, Error>({
+   519→   519→    mutationFn: async (): Promise<{ ok: boolean } | { id: string }> => {
+   520→   520→      const payload = {
+   521→   521→        sku: form.sku.trim(),
+   522→   522→        name: form.name.trim(),
+   523→   523→        categoryId: form.categoryId,
+   524→   524→        shortDescription: form.shortDescription.trim(),
+   525→   525→        description: form.description.trim(),
+   526→   526→        material: form.material.trim() || null,
+   527→   527→        dimensions: form.dimensions.trim() || null,
+   528→   528→        colour: form.colour.trim() || null,
+   529→   529→        printingOptions: form.printingOptions.trim() || null,
+   530→   530→        casePack: Number.parseInt(form.casePack, 10),
+   531→   531→        palletPack: form.palletPack.trim() === "" ? null : Number.parseInt(form.palletPack, 10),
+   532→   532→        minOrderQty: Number.parseInt(form.minOrderQty, 10),
+   533→   533→        increment: Number.parseInt(form.increment, 10),
+   534→   534→        unit: form.unit,
+   535→   535→        defaultPriceCents: form.defaultPrice.trim() === "" ? null : parsedPrice,
+   536→   536→        stockStatus: form.stockStatus,
+   537→   537→        leadTimeNote: form.leadTimeNote.trim() || null,
+   538→   538→      };
+   539→   539→      return isEdit
+   540→   540→        ? api.put<{ ok: boolean }>(`/api/admin/products/${product!.id}`, payload)
+   541→   541→        : api.post<{ id: string }>("/api/admin/products", payload);
+   542→   542→    },
+   543→   543→    onSuccess: () => {
+   544→   544→      queryClient.invalidateQueries({ queryKey: ["admin", "products"] });
+   545→   545→      queryClient.invalidateQueries({ queryKey: ["admin", "pricing"] });
+   546→   546→      queryClient.invalidateQueries({ queryKey: ["admin", "overview"] });
+   547→   547→      onOpenChange(false);
+   548→   548→      toast({
+   549→   549→        title: isEdit ? "Product updated" : "Product created",
+   550→   550→        description: `${form.sku.trim()} — ${form.name.trim()}`,
+   551→   551→      });
+   552→   552→    },
+   553→   553→    onError: (err: Error) => setSubmitError(err.message),
+   554→   554→  });
+   555→   555→
+   556→   556→  const set =
+   557→   557→    (key: keyof ProductForm) =>
+   558→   558→    (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+   559→   559→      setForm((f) => ({ ...f, [key]: e.target.value }));
+   560→   560→
+   561→   561→  function submit(e: React.FormEvent) {
+   562→   562→    e.preventDefault();
+   563→   563→    setSubmitError(null);
+   564→   564→    if (!form.sku.trim() || !form.name.trim() || !form.categoryId || !form.shortDescription.trim() || !form.description.trim()) {
+   565→   565→      setSubmitError("SKU, name, category and both descriptions are required.");
+   566→   566→      return;
+   567→   567→    }
+   568→   568→    for (const [label, raw] of [
+   569→   569→      ["Case pack", form.casePack],
+   570→   570→      ["Minimum order quantity", form.minOrderQty],
+   571→   571→      ["Quantity increment", form.increment],
+   572→   572→    ] as const) {
+   573→   573→      const n = Number.parseInt(raw, 10);
+   574→   574→      if (!Number.isFinite(n) || n < 1) {
+   575→   575→        setSubmitError(`${label} must be a whole number of 1 or more.`);
+   576→   576→        return;
+   577→   577→      }
+   578→   578→    }
+   579→   579→    if (form.palletPack.trim() !== "" && !(Number.parseInt(form.palletPack, 10) >= 1)) {
+   580→   580→      setSubmitError("Pallet pack must be a whole number of 1 or more.");
+   581→   581→      return;
+   582→   582→    }
+   583→   583→    if (priceInvalid) {
+   584→   584→      setSubmitError("Default price must be a valid dollar amount (e.g. 0.42), or blank for quote-required.");
+   585→   585→      return;
+   586→   586→    }
+   587→   587→    save.mutate();
+   588→   588→  }
+   589→   589→
+   590→   590→  return (
+   591→   591→    <Dialog open={open} onOpenChange={(v) => { onOpenChange(v); if (!v) setSubmitError(null); }}>
+   592→   592→      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-[640px]">
+   593→   593→        <form onSubmit={submit} className="space-y-5">
+   594→   594→          <DialogHeader className="border-b pb-4">
+   595→   595→            <DialogTitle className="text-[15px] font-medium">
+   596→   596→              {isEdit ? `Edit product — ${product!.sku}` : "New catalogue product"}
+   597→   597→            </DialogTitle>
+   598→   598→            <DialogDescription className="text-[12.5px] leading-relaxed">
+   599→   599→              {isEdit
+   600→   600→                ? "Changes apply immediately across the catalogue. Blank default price means quote-required."
+   601→   601→                : "Create a product customers can be approved to order. SKU must be unique."}
+   602→   602→            </DialogDescription>
+   603→   603→          </DialogHeader>
+   604→   604→
+   605→   605→          <div className="grid gap-3.5 sm:grid-cols-2">
+   606→   606→            <div className="space-y-1.5">
+   607→   607→              <Label htmlFor="prod-sku" className="text-[12.5px]">SKU</Label>
+   608→   608→              <Input id="prod-sku" value={form.sku} onChange={set("sku")} placeholder="JG-CB-MAI4" className="h-9 font-mono text-[12.5px]" required />
+   609→   609→            </div>
+   610→   610→            <div className="space-y-1.5">
+   611→   611→              <Label htmlFor="prod-name" className="text-[12.5px]">Product name</Label>
+   612→   612→              <Input id="prod-name" value={form.name} onChange={set("name")} placeholder="White Mailer Carton 10 × 7 × 4 in" className="h-9 text-[13px]" required />
+   613→   613→            </div>
+   614→   614→            <div className="space-y-1.5 sm:col-span-2">
+   615→   615→              <Label htmlFor="prod-category" className="text-[12.5px]">Category</Label>
+   616→   616→              <Select value={form.categoryId} onValueChange={(v) => setForm((f) => ({ ...f, categoryId: v }))}>
+   617→   617→                <SelectTrigger id="prod-category" className="h-9 w-full text-[13px]" aria-label="Product category">
+   618→   618→                  <SelectValue placeholder="Choose a category…" />
+   619→   619→                </SelectTrigger>
+   620→   620→                <SelectContent>
+   621→   621→                  {categories.map((c) => (
+   622→   622→                    <SelectItem key={c.id} value={c.id}>
+   623→   623→                      {c.name}
+   624→   624→                    </SelectItem>
+   625→   625→                  ))}
+   626→   626→                </SelectContent>
+   627→   627→              </Select>
+   628→   628→            </div>
+   629→   629→            <div className="space-y-1.5 sm:col-span-2">
+   630→   630→              <Label htmlFor="prod-short" className="text-[12.5px]">Short description <span className="text-muted-foreground">(catalogue card)</span></Label>
+   631→   631→              <Input id="prod-short" value={form.shortDescription} onChange={set("shortDescription")} placeholder="Standard 10-inch pizza box, lock-corner, kraft." className="h-9 text-[13px]" required />
+   632→   632→            </div>
+   633→   633→            <div className="space-y-1.5 sm:col-span-2">
+   634→   634→              <Label htmlFor="prod-desc" className="text-[12.5px]">Full description</Label>
+   635→   635→              <Textarea id="prod-desc" rows={3} value={form.description} onChange={set("description")} placeholder="Construction, performance and packaging details…" className="text-[13px]" required />
+   636→   636→            </div>
+   637→   637→
+   638→   638→            <GroupLabel className="sm:col-span-2">Specifications</GroupLabel>
+   639→   639→            <div className="space-y-1.5">
+   640→   640→              <Label htmlFor="prod-dimensions" className="text-[12.5px]">Dimensions</Label>
+   641→   641→              <Input id="prod-dimensions" value={form.dimensions} onChange={set("dimensions")} placeholder="10 × 10 × 1.75 in" className="h-9 text-[13px]" />
+   642→   642→            </div>
+   643→   643→            <div className="space-y-1.5">
+   644→   644→              <Label htmlFor="prod-material" className="text-[12.5px]">Material</Label>
+   645→   645→              <Input id="prod-material" value={form.material} onChange={set("material")} placeholder="Single-wall corrugated kraft" className="h-9 text-[13px]" />
+   646→   646→            </div>
+   647→   647→            <div className="space-y-1.5">
+   648→   648→              <Label htmlFor="prod-colour" className="text-[12.5px]">Colour</Label>
+   649→   649→              <Input id="prod-colour" value={form.colour} onChange={set("colour")} placeholder="Natural kraft" className="h-9 text-[13px]" />
+   650→   650→            </div>
+   651→   651→            <div className="space-y-1.5">
+   652→   652→              <Label htmlFor="prod-printing" className="text-[12.5px]">Printing options</Label>
+   653→   653→              <Input id="prod-printing" value={form.printingOptions} onChange={set("printingOptions")} placeholder="1–4 colour flexo on volume" className="h-9 text-[13px]" />
+   654→   654→            </div>
+   655→   655→
+   656→   656→            <GroupLabel className="sm:col-span-2">Ordering rules</GroupLabel>
+   657→   657→            <div className="space-y-1.5">
+   658→   658→              <Label htmlFor="prod-casepack" className="text-[12.5px]">Case pack</Label>
+   659→   659→              <Input id="prod-casepack" inputMode="numeric" value={form.casePack} onChange={set("casePack")} placeholder="100" className="tnum h-9 text-[13px]" required />
+   660→   660→            </div>
+   661→   661→            <div className="space-y-1.5">
+   662→   662→              <Label htmlFor="prod-palletpack" className="text-[12.5px]">Pallet pack <span className="text-muted-foreground">(optional)</span></Label>
+   663→   663→              <Input id="prod-palletpack" inputMode="numeric" value={form.palletPack} onChange={set("palletPack")} placeholder="1200" className="tnum h-9 text-[13px]" />
+   664→   664→            </div>
+   665→   665→            <div className="space-y-1.5">
+   666→   666→              <Label htmlFor="prod-moq" className="text-[12.5px]">Minimum order qty</Label>
+   667→   667→              <Input id="prod-moq" inputMode="numeric" value={form.minOrderQty} onChange={set("minOrderQty")} placeholder="500" className="tnum h-9 text-[13px]" required />
+   668→   668→            </div>
+   669→   669→            <div className="space-y-1.5">
+   670→   670→              <Label htmlFor="prod-increment" className="text-[12.5px]">Quantity increment</Label>
+   671→   671→              <Input id="prod-increment" inputMode="numeric" value={form.increment} onChange={set("increment")} placeholder="100" className="tnum h-9 text-[13px]" required />
+   672→   672→            </div>
+   673→   673→            <div className="space-y-1.5">
+   674→   674→              <Label htmlFor="prod-unit" className="text-[12.5px]">Sold per</Label>
+   675→   675→              <Select value={form.unit} onValueChange={(v) => setForm((f) => ({ ...f, unit: v }))}>
+   676→   676→                <SelectTrigger id="prod-unit" className="h-9 w-full text-[13px]" aria-label="Selling unit">
+   677→   677→                  <SelectValue />
+   678→   678→                </SelectTrigger>
+   679→   679→                <SelectContent>
+   680→   680→                  {UNITS.map((u) => (
+   681→   681→                    <SelectItem key={u} value={u}>
+   682→   682→                      {u === "each" ? "Each (per piece)" : "Case"}
+   683→   683→                    </SelectItem>
+   684→   684→                  ))}
+   685→   685→                </SelectContent>
+   686→   686→              </Select>
+   687→   687→            </div>
+   688→   688→            <div className="space-y-1.5">
+   689→   689→              <Label htmlFor="prod-stock" className="text-[12.5px]">Stock status</Label>
+   690→   690→              <Select value={form.stockStatus} onValueChange={(v) => setForm((f) => ({ ...f, stockStatus: v }))}>
+   691→   691→                <SelectTrigger id="prod-stock" className="h-9 w-full text-[13px]" aria-label="Stock status">
+   692→   692→                  <SelectValue />
+   693→   693→                </SelectTrigger>
+   694→   694→                <SelectContent>
+   695→   695→                  {STOCK_STATUSES.map((s) => (
+   696→   696→                    <SelectItem key={s} value={s}>
+   697→   697→                      {STOCK_STATUS_LABELS[s]}
+   698→   698→                    </SelectItem>
+   699→   699→                  ))}
+   700→   700→                </SelectContent>
+   701→   701→              </Select>
+   702→   702→            </div>
+   703→   703→
+   704→   704→            <GroupLabel className="sm:col-span-2">Pricing</GroupLabel>
+   705→   705→            <div className="space-y-1.5">
+   706→   706→              <Label htmlFor="prod-price" className="text-[12.5px]">
+   707→   707→                Default price <span className="text-muted-foreground">(blank = quotation required)</span>
+   708→   708→              </Label>
+   709→   709→              <div className="relative">
+   710→   710→                <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[12px] text-muted-foreground" aria-hidden>$</span>
+   711→   711→                <Input
+   712→   712→                  id="prod-price"
+   713→   713→                  inputMode="decimal"
+   714→   714→                  value={form.defaultPrice}
+   715→   715→                  onChange={set("defaultPrice")}
+   716→   716→                  placeholder="0.42"
+   717→   717→                  aria-invalid={priceInvalid || undefined}
+   718→   718→                  className="tnum h-9 pl-6 text-[13px]"
+   719→   719→                />
+   720→   720→              </div>
+   721→   721→              {priceInvalid ? <FieldError>Enter a valid amount, e.g. 0.42</FieldError> : null}
+   722→   722→            </div>
+   723→   723→            <div className="space-y-1.5">
+   724→   724→              <Label htmlFor="prod-lead" className="text-[12.5px]">Lead time note <span className="text-muted-foreground">(optional)</span></Label>
+   725→   725→              <Input id="prod-lead" value={form.leadTimeNote} onChange={set("leadTimeNote")} placeholder="2 weeks from artwork approval" className="h-9 text-[13px]" />
+   726→   726→            </div>
+   727→   727→          </div>
+   728→   728→
+   729→   729→          {submitError && <FieldError>{submitError}</FieldError>}
+   730→   730→
+   731→   731→          <DialogFooter className="border-t pt-4">
+   732→   732→            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
+   733→   733→            <Button type="submit" className="gap-1.5" disabled={save.isPending}>
+   734→   734→              {save.isPending ? "Saving…" : isEdit ? "Save product" : "Create product"}
+   735→   735→            </Button>
+   736→   736→          </DialogFooter>
+   737→   737→        </form>
+   738→   738→      </DialogContent>
+   739→   739→    </Dialog>
+   740→   740→  );
+   741→   741→}
+   742→   742→

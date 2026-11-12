@@ -1,0 +1,611 @@
+     1→"use client";
+     2→
+     3→// "Issue a quotation on behalf of a customer" — for enquiries customers send
+     4→// by email, phone or in person. The quotation lands on their account as
+     5→// ISSUED with the pricing entered here, ready for them to accept.
+     6→
+     7→import { useState } from "react";
+     8→import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+     9→import { FileCheck2, Plus, X } from "lucide-react";
+    10→import { Button } from "@/components/ui/button";
+    11→import { Input } from "@/components/ui/input";
+    12→import { Label } from "@/components/ui/label";
+    13→import { Textarea } from "@/components/ui/textarea";
+    14→import { Switch } from "@/components/ui/switch";
+    15→import {
+    16→  Dialog,
+    17→  DialogContent,
+    18→  DialogDescription,
+    19→  DialogFooter,
+    20→  DialogHeader,
+    21→  DialogTitle,
+    22→} from "@/components/ui/dialog";
+    23→import {
+    24→  Select,
+    25→  SelectContent,
+    26→  SelectGroup,
+    27→  SelectItem,
+    28→  SelectLabel,
+    29→  SelectTrigger,
+    30→  SelectValue,
+    31→} from "@/components/ui/select";
+    32→import { QtyStepper } from "@/components/portal/portal-bits";
+    33→import { Money } from "@/components/shared/money";
+    34→import { api } from "@/lib/api-client";
+    35→import { ORDER_SOURCE_LABELS, QUOTE_ITEM_KIND_LABELS } from "@/lib/constants";
+    36→import { centsToInputValue, parseDollarsToCents } from "@/lib/money";
+    37→import { useAppStore } from "@/store/app-store";
+    38→import { toast } from "@/hooks/use-toast";
+    39→import type { AdminProduct, CustomerListItem, CustomerProfile } from "@/types";
+    40→import { FieldError, GroupLabel } from "./admin-ui";
+    41→
+    42→const NONE = "__none__";
+    43→const SOURCES = ["EMAIL", "PHONE", "IN_PERSON"] as const;
+    44→
+    45→type ProductLine = {
+    46→  kind: "PRODUCT";
+    47→  productId: string;
+    48→  sku: string;
+    49→  name: string;
+    50→  qty: number;
+    51→  // null = follow the customer's live effective price (shown pre-filled);
+    52→  // a string = an admin-entered price in dollars ("0.42", "12.50")
+    53→  priceInput: string | null;
+    54→};
+    55→
+    56→type ChargeLine = {
+    57→  kind: "CHARGE";
+    58→  description: string;
+    59→  chargeKind: "SETUP" | "FREIGHT" | "OTHER";
+    60→  qty: number;
+    61→  priceInput: string | null;
+    62→};
+    63→
+    64→type Line = ProductLine | ChargeLine;
+    65→
+    66→export function AdminNewQuoteDialog({
+    67→  open,
+    68→  onOpenChange,
+    69→}: {
+    70→  open: boolean;
+    71→  onOpenChange: (v: boolean) => void;
+    72→}) {
+    73→  const navigate = useAppStore((s) => s.navigate);
+    74→  const queryClient = useQueryClient();
+    75→
+    76→  const { data: customers } = useQuery({
+    77→    queryKey: ["admin", "customers", ""],
+    78→    queryFn: () => api.get<CustomerListItem[]>("/api/admin/customers?search="),
+    79→    enabled: open,
+    80→  });
+    81→
+    82→  const { data: products } = useQuery({
+    83→    queryKey: ["admin", "products", { search: "", category: "" }],
+    84→    queryFn: () => api.get<AdminProduct[]>("/api/admin/products"),
+    85→    enabled: open,
+    86→  });
+    87→
+    88→  const [orgId, setOrgId] = useState("");
+    89→  const [sourceType, setSourceType] = useState<string>("EMAIL");
+    90→  const [title, setTitle] = useState("");
+    91→  const [lines, setLines] = useState<Line[]>([]);
+    92→  const [expiryDate, setExpiryDate] = useState("");
+    93→  const [terms, setTerms] = useState("");
+    94→  const [notes, setNotes] = useState("");
+    95→  const [notifyCustomer, setNotifyCustomer] = useState(true);
+    96→  const [submitError, setSubmitError] = useState<string | null>(null);
+    97→
+    98→  // Org-scoped profile: customer price overrides.
+    99→  const { data: profile } = useQuery({
+   100→    queryKey: ["admin", "customer", orgId],
+   101→    queryFn: () => api.get<CustomerProfile>(`/api/admin/customers/${orgId}`),
+   102→    enabled: open && orgId !== "",
+   103→  });
+   104→
+   105→  function resetForm() {
+   106→    setOrgId("");
+   107→    setSourceType("EMAIL");
+   108→    setTitle("");
+   109→    setLines([]);
+   110→    setExpiryDate("");
+   111→    setTerms("");
+   112→    setNotes("");
+   113→    setNotifyCustomer(true);
+   114→    setSubmitError(null);
+   115→  }
+   116→
+   117→  function handleOpenChange(v: boolean) {
+   118→    if (v) resetForm();
+   119→    onOpenChange(v);
+   120→  }
+   121→
+   122→  const activeProducts = (products ?? []).filter((p) => p.isActive);
+   123→  const priceByProduct = new Map<string, number | null>();
+   124→  for (const price of profile?.prices ?? []) {
+   125→    priceByProduct.set(price.productId, price.priceCents);
+   126→  }
+   127→  for (const p of activeProducts) {
+   128→    if (!priceByProduct.has(p.id)) priceByProduct.set(p.id, p.defaultPriceCents);
+   129→  }
+   130→
+   131→  const productsByCategory = new Map<string, AdminProduct[]>();
+   132→  for (const p of activeProducts) {
+   133→    const list = productsByCategory.get(p.categoryName) ?? [];
+   134→    list.push(p);
+   135→    productsByCategory.set(p.categoryName, list);
+   136→  }
+   137→
+   138→  function unitPrice(productId: string): number | null {
+   139→    return priceByProduct.get(productId) ?? null;
+   140→  }
+   141→
+   142→  /** The cents quoted on a line: typed price > effective price. */
+   143→  function lineCents(line: Line): number | null {
+   144→    if (line.priceInput !== null) return parseDollarsToCents(line.priceInput);
+   145→    if (line.kind === "PRODUCT") return unitPrice(line.productId);
+   146→    return null;
+   147→  }
+   148→
+   149→  const totalCents = lines.reduce((sum, line) => {
+   150→    const cents = lineCents(line);
+   151→    return cents === null ? sum : sum + line.qty * cents;
+   152→  }, 0);
+   153→  const unpricedCount = lines.filter((l) => lineCents(l) === null).length;
+   154→
+   155→  function addProduct(productId: string) {
+   156→    const product = activeProducts.find((p) => p.id === productId);
+   157→    if (!product) return;
+   158→    setLines((ls) => {
+   159→      const existing = ls.findIndex((l) => l.kind === "PRODUCT" && l.productId === productId);
+   160→      if (existing >= 0) {
+   161→        return ls.map((l, i) => (i === existing && l.kind === "PRODUCT" ? { ...l, qty: l.qty + 1 } : l));
+   162→      }
+   163→      return [...ls, { kind: "PRODUCT", productId, sku: product.sku, name: product.name, qty: 1, priceInput: null }];
+   164→    });
+   165→  }
+   166→
+   167→  const create = useMutation({
+   168→    mutationFn: () =>
+   169→      api.post<{ id: string; quoteNumber: string }>("/api/admin/quotations", {
+   170→        orgId,
+   171→        sourceType,
+   172→        title: title.trim(),
+   173→        items: lines.map((line) => {
+   174→          const cents = lineCents(line);
+   175→          const priced = line.kind === "PRODUCT" || line.priceInput !== null ? cents : null;
+   176→          const description =
+   177→            line.kind === "PRODUCT" ? line.name : line.description.trim();
+   178→          const kind = line.kind === "PRODUCT" ? "PRODUCT" : line.chargeKind;
+   179→          const payload = { description, kind, qty: line.qty };
+   180→          return priced === null ? payload : { ...payload, unitPriceCents: priced };
+   181→        }),
+   182→        expiryDate: expiryDate || undefined,
+   183→        terms: terms.trim() || undefined,
+   184→        notes: notes.trim() || undefined,
+   185→        notifyCustomer,
+   186→      }),
+   187→    onSuccess: (res) => {
+   188→      queryClient.invalidateQueries({ queryKey: ["admin", "quotes"] });
+   189→      queryClient.invalidateQueries({ queryKey: ["admin", "overview"] });
+   190→      queryClient.invalidateQueries({ queryKey: ["notifications"] });
+   191→      if (orgId) queryClient.invalidateQueries({ queryKey: ["admin", "customer", orgId] });
+   192→      const orgName = (customers ?? []).find((c) => c.id === orgId)?.name ?? "the customer";
+   193→      toast({
+   194→        title: `${res.quoteNumber} issued to ${orgName}`,
+   195→        description: notifyCustomer
+   196→          ? "The quotation is on their account and the organization has been notified."
+   197→          : "The quotation is on their account — no notification was sent.",
+   198→      });
+   199→      onOpenChange(false);
+   200→      navigate("admin-quote-detail", { id: res.id });
+   201→    },
+   202→    onError: (err: Error) => setSubmitError(err.message),
+   203→  });
+   204→
+   205→  function submit(e: React.FormEvent) {
+   206→    e.preventDefault();
+   207→    setSubmitError(null);
+   208→    if (!orgId) {
+   209→      setSubmitError("Choose the customer organization this quotation belongs to.");
+   210→      return;
+   211→    }
+   212→    if (!title.trim()) {
+   213→      setSubmitError("Give the quotation a title (what it covers).");
+   214→      return;
+   215→    }
+   216→    if (lines.length === 0) {
+   217→      setSubmitError("Add at least one product or charge line.");
+   218→      return;
+   219→    }
+   220→    if (lines.some((l) => l.kind === "CHARGE" && !l.description.trim())) {
+   221→      setSubmitError("Give every charge line a description (what it is for).");
+   222→      return;
+   223→    }
+   224→    if (lines.some((l) => l.qty < 1)) {
+   225→      setSubmitError("Every line needs a quantity of at least 1.");
+   226→      return;
+   227→    }
+   228→    if (lines.some((l) => l.priceInput !== null && l.priceInput.trim() !== "" && parseDollarsToCents(l.priceInput) === null)) {
+   229→      setSubmitError("Enter unit prices as dollar amounts — for example 0.42 or 12.50.");
+   230→      return;
+   231→    }
+   232→    const unpricedProduct = lines.find((l) => l.kind === "PRODUCT" && lineCents(l) === null);
+   233→    if (unpricedProduct && unpricedProduct.kind === "PRODUCT") {
+   234→      setSubmitError(`${unpricedProduct.name} has no published price — enter the unit price to quote.`);
+   235→      return;
+   236→    }
+   237→    create.mutate();
+   238→  }
+   239→
+   240→  return (
+   241→    <Dialog open={open} onOpenChange={handleOpenChange}>
+   242→      <DialogContent className="max-h-[88vh] gap-0 overflow-y-auto sm:max-w-[720px]">
+   243→        <form onSubmit={submit} className="space-y-5">
+   244→          <DialogHeader className="border-b pb-4">
+   245→            <DialogTitle>Issue a quotation on behalf of a customer</DialogTitle>
+   246→            <DialogDescription className="leading-relaxed">
+   247→              For enquiries customers send by email or phone — build the quotation with the products and pricing you
+   248→              settled with them. It appears on their account as issued, ready for them to review and accept in
+   249→              ClientHub.
+   250→            </DialogDescription>
+   251→          </DialogHeader>
+   252→
+   253→          {/* Customer + provenance + title */}
+   254→          <div className="grid gap-3.5 sm:grid-cols-2">
+   255→            <div className="space-y-1.5">
+   256→              <Label htmlFor="q-org" className="text-body-sm">
+   257→                Customer organization
+   258→              </Label>
+   259→              <Select value={orgId} onValueChange={setOrgId}>
+   260→                <SelectTrigger id="q-org" className="h-9 w-full text-body-sm" aria-label="Customer organization">
+   261→                  <SelectValue placeholder="Choose a customer…" />
+   262→                </SelectTrigger>
+   263→                <SelectContent>
+   264→                  {(customers ?? []).map((c) => (
+   265→                    <SelectItem key={c.id} value={c.id}>
+   266→                      {c.name}
+   267→                      <span className="ml-1.5 font-mono text-caption text-muted-foreground">{c.code}</span>
+   268→                    </SelectItem>
+   269→                  ))}
+   270→                </SelectContent>
+   271→              </Select>
+   272→            </div>
+   273→            <div className="space-y-1.5">
+   274→              <Label htmlFor="q-source" className="text-body-sm">
+   275→                How was this enquiry received?
+   276→              </Label>
+   277→              <Select value={sourceType} onValueChange={setSourceType}>
+   278→                <SelectTrigger id="q-source" className="h-9 w-full text-body-sm" aria-label="Enquiry source">
+   279→                  <SelectValue />
+   280→                </SelectTrigger>
+   281→                <SelectContent>
+   282→                  {SOURCES.map((s) => (
+   283→                    <SelectItem key={s} value={s}>
+   284→                      {ORDER_SOURCE_LABELS[s]}
+   285→                    </SelectItem>
+   286→                  ))}
+   287→                </SelectContent>
+   288→              </Select>
+   289→            </div>
+   290→            <div className="space-y-1.5 sm:col-span-2">
+   291→              <Label htmlFor="q-title" className="text-body-sm">
+   292→                Quotation title
+   293→              </Label>
+   294→              <Input
+   295→                id="q-title"
+   296→                value={title}
+   297→                onChange={(e) => setTitle(e.target.value)}
+   298→                placeholder="e.g. Custom-printed pizza boxes — autumn refresh"
+   299→                className="h-9 text-body-sm"
+   300→                maxLength={160}
+   301→              />
+   302→              {orgId && profile && (
+   303→                <p className="tnum text-caption text-muted-foreground">
+   304→                  {profile.prices.filter((p) => p.priceCents !== null).length} custom prices applied
+   305→                </p>
+   306→              )}
+   307→            </div>
+   308→          </div>
+   309→
+   310→          {/* Items builder */}
+   311→          <div className="space-y-2.5">
+   312→            <GroupLabel>Quoted items</GroupLabel>
+   313→            <p className="-mt-1.5 text-caption text-muted-foreground">
+   314→              Prices pre-fill from the customer&apos;s negotiated pricing — edit any unit price to quote what you
+   315→              actually agreed over email or the phone.
+   316→            </p>
+   317→            <Select value={NONE} onValueChange={(v) => v !== NONE && addProduct(v)}>
+   318→              <SelectTrigger className="h-9 w-full text-body-sm" aria-label="Add a product">
+   319→                <SelectValue placeholder="Add a product…" />
+   320→              </SelectTrigger>
+   321→              <SelectContent>
+   322→                <SelectItem value={NONE}>Add a product…</SelectItem>
+   323→                {Array.from(productsByCategory.entries()).map(([category, list]) => (
+   324→                  <SelectGroup key={category}>
+   325→                    <SelectLabel className="text-micro">{category}</SelectLabel>
+   326→                    {list.map((p) => (
+   327→                      <SelectItem key={p.id} value={p.id}>
+   328→                        {p.name}
+   329→                        <span className="ml-1.5 font-mono text-caption text-muted-foreground">{p.sku}</span>
+   330→                      </SelectItem>
+   331→                    ))}
+   332→                  </SelectGroup>
+   333→                ))}
+   334→              </SelectContent>
+   335→            </Select>
+   336→
+   337→            {lines.length === 0 ? (
+   338→              <p className="rounded-md border border-dashed bg-surface-sunken/60 px-4 py-5 text-center text-body-sm text-muted-foreground">
+   339→                No lines yet — pick products from the catalogue, or add a charge for setup, freight or anything
+   340→                unusual.
+   341→              </p>
+   342→            ) : (
+   343→              <ul className="divide-y overflow-hidden rounded-md border">
+   344→                {lines.map((line, i) => (
+   345→                  <li key={i} className="px-3.5 py-3">
+   346→                    {line.kind === "PRODUCT" ? (
+   347→                      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+   348→                        <div className="min-w-0 flex-1">
+   349→                          <p className="truncate text-body-sm font-medium">{line.name}</p>
+   350→                          <p className="font-mono text-caption text-muted-foreground">{line.sku}</p>
+   351→                        </div>
+   352→                        <QtyStepper
+   353→                          value={line.qty}
+   354→                          onChange={(q) =>
+   355→                            setLines((ls) => ls.map((l, idx) => (idx === i && l.kind === "PRODUCT" ? { ...l, qty: q } : l)))
+   356→                          }
+   357→                          min={1}
+   358→                          size="sm"
+   359→                          ariaLabel={`Quantity for ${line.name}`}
+   360→                        />
+   361→                        <div className="flex w-[104px] flex-col items-end gap-0.5">
+   362→                          <div className="relative">
+   363→                            <span
+   364→                              className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-caption text-muted-foreground"
+   365→                              aria-hidden
+   366→                            >
+   367→                              $
+   368→                            </span>
+   369→                            <Input
+   370→                              value={
+   371→                                line.priceInput !== null
+   372→                                  ? line.priceInput
+   373→                                  : unitPrice(line.productId) !== null
+   374→                                    ? centsToInputValue(unitPrice(line.productId) as number)
+   375→                                    : ""
+   376→                              }
+   377→                              onChange={(e) =>
+   378→                                setLines((ls) =>
+   379→                                  ls.map((l, idx) => (idx === i && l.kind === "PRODUCT" ? { ...l, priceInput: e.target.value } : l)),
+   380→                                )
+   381→                              }
+   382→                              placeholder={unitPrice(line.productId) === null ? "Quote" : "0.00"}
+   383→                              className="h-8 w-[104px] pl-5 pr-2.5 text-right font-mono text-body-sm tnum focus:border-ring focus:ring-2 focus:ring-ring/50"
+   384→                              inputMode="decimal"
+   385→                              aria-label={`Unit price for ${line.name}`}
+   386→                              maxLength={12}
+   387→                            />
+   388→                          </div>
+   389→                          <p className="tnum text-body-sm font-medium">
+   390→                            {lineCents(line) === null ? (
+   391→                              <span className="text-caption font-normal text-muted-foreground">Total TBC</span>
+   392→                            ) : (
+   393→                              <Money cents={line.qty * (lineCents(line) as number)} />
+   394→                            )}
+   395→                          </p>
+   396→                        </div>
+   397→                        <Button
+   398→                          type="button"
+   399→                          variant="ghost"
+   400→                          size="icon"
+   401→                          className="size-7 text-muted-foreground hover:text-foreground"
+   402→                          aria-label={`Remove ${line.name}`}
+   403→                          onClick={() => setLines((ls) => ls.filter((_, idx) => idx !== i))}
+   404→                        >
+   405→                          <X className="size-3.5" aria-hidden />
+   406→                        </Button>
+   407→                      </div>
+   408→                    ) : (
+   409→                      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+   410→                        <div className="min-w-0 flex-1 space-y-2">
+   411→                          <Input
+   412→                            value={line.description}
+   413→                            onChange={(e) =>
+   414→                              setLines((ls) =>
+   415→                                ls.map((l, idx) => (idx === i && l.kind === "CHARGE" ? { ...l, description: e.target.value } : l)),
+   416→                              )
+   417→                            }
+   418→                            placeholder="Charge — e.g. Plate &amp; die charge"
+   419→                            className="h-8 text-body-sm"
+   420→                            aria-label="Charge description"
+   421→                            maxLength={200}
+   422→                          />
+   423→                          <Select
+   424→                            value={line.chargeKind}
+   425→                            onValueChange={(v) =>
+   426→                              setLines((ls) =>
+   427→                                ls.map((l, idx) =>
+   428→                                  idx === i && l.kind === "CHARGE" ? { ...l, chargeKind: v as ChargeLine["chargeKind"] } : l,
+   429→                                ),
+   430→                              )
+   431→                            }
+   432→                          >
+   433→                            <SelectTrigger
+   434→                              className="h-8 w-full text-body-sm"
+   435→                              aria-label={`Kind for charge line ${i + 1}`}
+   436→                            >
+   437→                              <SelectValue />
+   438→                            </SelectTrigger>
+   439→                            <SelectContent>
+   440→                              {(["SETUP", "FREIGHT", "OTHER"] as const).map((k) => (
+   441→                                <SelectItem key={k} value={k}>
+   442→                                  {QUOTE_ITEM_KIND_LABELS[k]}
+   443→                                </SelectItem>
+   444→                              ))}
+   445→                            </SelectContent>
+   446→                          </Select>
+   447→                        </div>
+   448→                        <QtyStepper
+   449→                          value={line.qty}
+   450→                          onChange={(q) =>
+   451→                            setLines((ls) => ls.map((l, idx) => (idx === i && l.kind === "CHARGE" ? { ...l, qty: q } : l)))
+   452→                          }
+   453→                          min={1}
+   454→                          size="sm"
+   455→                          ariaLabel="Quantity for charge line"
+   456→                        />
+   457→                        <div className="flex w-[104px] flex-col items-end gap-0.5">
+   458→                          <div className="relative">
+   459→                            <span
+   460→                              className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-caption text-muted-foreground"
+   461→                              aria-hidden
+   462→                            >
+   463→                              $
+   464→                            </span>
+   465→                            <Input
+   466→                              value={line.priceInput ?? ""}
+   467→                              onChange={(e) =>
+   468→                                setLines((ls) =>
+   469→                                  ls.map((l, idx) => (idx === i && l.kind === "CHARGE" ? { ...l, priceInput: e.target.value } : l)),
+   470→                                )
+   471→                              }
+   472→                              placeholder="TBC"
+   473→                              className="h-8 w-[104px] pl-5 pr-2.5 text-right font-mono text-body-sm tnum focus:border-ring focus:ring-2 focus:ring-ring/50"
+   474→                              inputMode="decimal"
+   475→                              aria-label={`Unit price for ${line.description || "charge line"}`}
+   476→                              maxLength={12}
+   477→                            />
+   478→                          </div>
+   479→                          <p className="tnum text-body-sm font-medium">
+   480→                            {lineCents(line) === null ? (
+   481→                              <span className="text-caption font-normal text-muted-foreground">Pricing TBC</span>
+   482→                            ) : (
+   483→                              <Money cents={line.qty * (lineCents(line) as number)} />
+   484→                            )}
+   485→                          </p>
+   486→                        </div>
+   487→                        <Button
+   488→                          type="button"
+   489→                          variant="ghost"
+   490→                          size="icon"
+   491→                          className="size-7 text-muted-foreground hover:text-foreground"
+   492→                          aria-label="Remove charge line"
+   493→                          onClick={() => setLines((ls) => ls.filter((_, idx) => idx !== i))}
+   494→                        >
+   495→                          <X className="size-3.5" aria-hidden />
+   496→                        </Button>
+   497→                      </div>
+   498→                    )}
+   499→                  </li>
+   500→                ))}
+   501→              </ul>
+   502→            )}
+   503→
+   504→            <Button
+   505→              type="button"
+   506→              variant="outline"
+   507→              size="sm"
+   508→              className="gap-1.5"
+   509→              onClick={() => setLines((ls) => [...ls, { kind: "CHARGE", description: "", chargeKind: "SETUP", qty: 1, priceInput: null }])}
+   510→            >
+   511→              <Plus className="size-3.5" aria-hidden />
+   512→              Add charge line
+   513→            </Button>
+   514→
+   515→            {lines.length > 0 && (
+   516→              <div className="flex flex-col items-end gap-0.5 rounded-md border bg-secondary/50 px-3.5 py-2.5 text-body-sm">
+   517→                <div className="flex w-full items-baseline justify-between border-t pt-1">
+   518→                  <span className="font-medium">Quotation total</span>
+   519→                  <Money cents={totalCents} className="font-semibold" />
+   520→                </div>
+   521→                {unpricedCount > 0 && (
+   522→                  <p className="mt-0.5 self-end text-caption text-muted-foreground">
+   523→                    {unpricedCount} line{unpricedCount === 1 ? "" : "s"} not yet priced — excluded from the total.
+   524→                  </p>
+   525→                )}
+   526→              </div>
+   527→            )}
+   528→          </div>
+   529→
+   530→          {/* Validity & terms */}
+   531→          <div className="space-y-2.5">
+   532→            <GroupLabel>Validity &amp; notes</GroupLabel>
+   533→            <div className="grid gap-3.5 sm:grid-cols-2">
+   534→              <div className="space-y-1.5">
+   535→                <Label htmlFor="q-expiry" className="text-body-sm">
+   536→                  Valid until <span className="text-muted-foreground">(optional)</span>
+   537→                </Label>
+   538→                <Input
+   539→                  id="q-expiry"
+   540→                  type="date"
+   541→                  value={expiryDate}
+   542→                  onChange={(e) => setExpiryDate(e.target.value)}
+   543→                  className="h-9 text-body-sm"
+   544→                />
+   545→              </div>
+   546→              <div className="space-y-1.5 sm:col-span-2">
+   547→                <Label htmlFor="q-terms" className="text-body-sm">
+   548→                  Terms <span className="text-muted-foreground">(shown on the quotation document)</span>
+   549→                </Label>
+   550→                <Textarea
+   551→                  id="q-terms"
+   552→                  rows={3}
+   553→                  value={terms}
+   554→                  onChange={(e) => setTerms(e.target.value)}
+   555→                  placeholder="Payment terms, lead time, delivery conditions…"
+   556→                  className="leading-relaxed"
+   557→                  maxLength={4000}
+   558→                />
+   559→              </div>
+   560→              <div className="space-y-1.5 sm:col-span-2">
+   561→                <Label htmlFor="q-notes" className="text-body-sm">
+   562→                  Notes to the customer <span className="text-muted-foreground">(optional)</span>
+   563→                </Label>
+   564→                <Textarea
+   565→                  id="q-notes"
+   566→                  rows={2}
+   567→                  value={notes}
+   568→                  onChange={(e) => setNotes(e.target.value)}
+   569→                  placeholder="Anything from the email thread the customer should see on the quote."
+   570→                  className="leading-relaxed"
+   571→                  maxLength={2000}
+   572→                />
+   573→              </div>
+   574→            </div>
+   575→          </div>
+   576→
+   577→          {/* Notify */}
+   578→          <div className="flex items-start justify-between gap-3 rounded-md border bg-secondary/50 px-3.5 py-3">
+   579→            <div className="min-w-0">
+   580→              <Label htmlFor="q-notify" className="text-body-sm font-medium">
+   581→                Notify the customer organization
+   582→              </Label>
+   583→              <p className="mt-0.5 text-caption leading-snug text-muted-foreground">
+   584→                A notification lands in their portal — the quotation appears on their account either way.
+   585→              </p>
+   586→            </div>
+   587→            <Switch
+   588→              id="q-notify"
+   589→              checked={notifyCustomer}
+   590→              onCheckedChange={setNotifyCustomer}
+   591→              aria-label="Notify the customer organization"
+   592→            />
+   593→          </div>
+   594→
+   595→          {submitError && <FieldError>{submitError}</FieldError>}
+   596→
+   597→          <DialogFooter className="border-t pt-4">
+   598→            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
+   599→              Cancel
+   600→            </Button>
+   601→            <Button type="submit" className="gap-1.5" disabled={create.isPending}>
+   602→              <FileCheck2 className={create.isPending ? "size-4 animate-pulse" : "size-4"} aria-hidden />
+   603→              {create.isPending ? "Issuing…" : "Issue quotation"}
+   604→            </Button>
+   605→          </DialogFooter>
+   606→        </form>
+   607→      </DialogContent>
+   608→    </Dialog>
+   609→  );
+   610→}
+   611→

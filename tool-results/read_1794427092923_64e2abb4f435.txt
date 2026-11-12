@@ -1,0 +1,575 @@
+    45→    45→
+    46→    46→type AccountPayload = {
+    47→    47→  addresses: { id: string; label: string; line1: string; line2: string | null; city: string; province: string; postal: string; isDefault: boolean }[];
+    48→    48→};
+    49→    49→
+    50→    50→const STEPS = [
+    51→    51→  { n: 1, label: "Review" },
+    52→    52→  { n: 2, label: "Delivery" },
+    53→    53→  { n: 3, label: "Reference" },
+    54→    54→  { n: 4, label: "Submit" },
+    55→    55→] as const;
+    56→    56→
+    57→    57→export function CartView() {
+    58→    58→  const navigate = useAppStore((s) => s.navigate);
+    59→    59→  const lines = useCartStore((s) => s.lines);
+    60→    60→  const setQty = useCartStore((s) => s.setQty);
+    61→    61→  const removeLine = useCartStore((s) => s.removeLine);
+    62→    62→  const clear = useCartStore((s) => s.clear);
+    63→    63→
+    64→    64→  const queryClient = useQueryClient();
+    65→    65→  const [step, setStep] = useState(1);
+    66→    66→  const [addressId, setAddressId] = useState<string>("");
+    67→    67→  const [orderNotes, setOrderNotes] = useState("");
+    68→    68→  const [requestedDelivery, setRequestedDelivery] = useState("");
+    69→    69→  const [poNumber, setPoNumber] = useState("");
+    70→    70→  const [specialInstructions, setSpecialInstructions] = useState("");
+    71→    71→  const [submitError, setSubmitError] = useState<string | null>(null);
+    72→    72→
+    73→    73→  const { data: account, isLoading: accountLoading, error: accountError } = useQuery({
+    74→    74→    queryKey: ["customer-account"],
+    75→    75→    queryFn: () => api.get<AccountPayload>("/api/customer/account"),
+    76→    76→    enabled: lines.length > 0,
+    77→    77→  });
+    78→    78→
+    79→    79→  // Default the address selection once account data arrives.
+    80→    80→  const addresses = account?.addresses ?? [];
+    81→    81→  const selectedAddress =
+    82→    82→    addresses.find((a) => a.id === addressId) ??
+    83→    83→    (addressId === "" ? (addresses.find((a) => a.isDefault) ?? addresses[0]) : undefined);
+    84→    84→
+    85→    85→  const subtotal = lines.reduce((sum, l) => sum + l.qty * l.unitPriceCents, 0);
+    86→    86→  const tax = taxFromSubtotalCents(subtotal, DEFAULT_TAX_RATE_BP);
+    87→    87→  const total = subtotal + tax;
+    88→    88→
+    89→    89→  const validQtys = lines.every((l) => l.qty >= l.minOrderQty && l.qty % l.increment === 0);
+    90→    90→
+    91→    91→  const submitMutation = useMutation({
+    92→    92→    mutationFn: () => {
+    93→    93→      const notes = [
+    94→    94→        orderNotes.trim() ? `Order notes: ${orderNotes.trim()}` : null,
+    95→    95→        specialInstructions.trim() ? `Special instructions: ${specialInstructions.trim()}` : null,
+    96→    96→      ]
+    97→    97→        .filter(Boolean)
+    98→    98→        .join("\n\n");
+    99→    99→      const chosen = selectedAddress ?? undefined;
+   100→   100→      return api.post<{ id: string; orderNumber: string }>("/api/customer/orders", {
+   101→   101→        items: lines.map((l) => ({ productId: l.productId, qty: l.qty })),
+   102→   102→        ...(chosen ? { addressId: chosen.id } : {}),
+   103→   103→        poNumber: poNumber.trim() || undefined,
+   104→   104→        notes: notes || undefined,
+   105→   105→        requestedDelivery: requestedDelivery.trim() || undefined,
+   106→   106→      });
+   107→   107→    },
+   108→   108→    onSuccess: (res) => {
+   109→   109→      clear();
+   110→   110→      queryClient.invalidateQueries({ queryKey: ["orders"] });
+   111→   111→      queryClient.invalidateQueries({ queryKey: ["customer-dashboard"] });
+   112→   112→      queryClient.invalidateQueries({ queryKey: ["notifications"] });
+   113→   113→      toast({
+   114→   114→        title: "Order request submitted",
+   115→   115→        description: `${res.orderNumber} — we'll confirm availability and pricing, then notify you.`,
+   116→   116→      });
+   117→   117→      navigate("order-detail", { id: res.id });
+   118→   118→    },
+   119→   119→    onError: (err) =>
+   120→   120→      setSubmitError(
+   121→   121→        err instanceof Error ? err.message : "We could not submit your order request. Please try again.",
+   122→   122→      ),
+   123→   123→  });
+   124→   124→
+   125→   125→  function goTo(next: number) {
+   126→   126→    if (next > 1 && !validQtys) {
+   127→   127→      toast({
+   128→   128→        title: "Check your quantities",
+   129→   129→        description: "Quantities must respect each product's minimum and multiples.",
+   130→   130→      });
+   131→   131→      return;
+   132→   132→    }
+   133→   133→    setSubmitError(null);
+   134→   134→    setStep(next);
+   135→   135→  }
+   136→   136→
+   137→   137→  function submit(e: React.FormEvent) {
+   138→   138→    e.preventDefault();
+   139→   139→    // Enter in any input behaves like "Continue" until the final step.
+   140→   140→    if (step < 4) {
+   141→   141→      goTo(step + 1);
+   142→   142→      return;
+   143→   143→    }
+   144→   144→    if (!validQtys) {
+   145→   145→      setSubmitError("Quantities must respect each product's minimum and multiples.");
+   146→   146→      return;
+   147→   147→    }
+   148→   148→    setSubmitError(null);
+   149→   149→    submitMutation.mutate();
+   150→   150→  }
+   151→   151→
+   152→   152→  if (lines.length === 0) {
+   153→   153→    return (
+   154→   154→      <div>
+   155→   155→        <PageHeader title="Order Cart" description="Build an order request from your approved products." />
+   156→   156→        <EmptyState
+   157→   157→          icon={ShoppingCart}
+   158→   158→          title="Your cart is empty"
+   159→   159→          description="Browse your approved catalogue and add products — pricing specific to your account is shown on every item."
+   160→   160→          action={
+   161→   161→            <Button onClick={() => navigate("catalog")} className="gap-2">
+   162→   162→              Browse products <ChevronRight className="size-4" aria-hidden />
+   163→   163→            </Button>
+   164→   164→          }
+   165→   165→        />
+   166→   166→      </div>
+   167→   167→    );
+   168→   168→  }
+   169→   169→
+   170→   170→  return (
+   171→   171→    <div>
+   172→   172→      <PageHeader
+   173→   173→        title="Order Cart"
+   174→   174→        description="Submitting sends a request — Jeffery Group confirms availability, pricing and the delivery date before anything is produced or shipped."
+   175→   175→      />
+   176→   176→
+   177→   177→      {/* Stepper */}
+   178→   178→      <ol className="mb-5 flex flex-wrap items-center gap-x-1 gap-y-2" aria-label="Order request steps">
+   179→   179→        {STEPS.map((s, i) => {
+   180→   180→          const done = s.n < step;
+   181→   181→          const current = s.n === step;
+   182→   182→          return (
+   183→   183→            <li key={s.n} className="flex items-center gap-1.5 sm:gap-2">
+   184→   184→              <button
+   185→   185→                type="button"
+   186→   186→                disabled={s.n >= step}
+   187→   187→                onClick={() => goTo(s.n)}
+   188→   188→                aria-current={current ? "step" : undefined}
+   189→   189→                className={cn(
+   190→   190→                  "flex items-center gap-2 rounded-full py-1 pl-1 pr-2.5 text-[12.5px] transition-colors",
+   191→   191→                  s.n >= step ? "cursor-default" : "hover:bg-muted/60",
+   192→   192→                  current ? "font-medium text-foreground" : done ? "text-muted-foreground" : "text-muted-foreground/70",
+   193→   193→                )}
+   194→   194→              >
+   195→   195→                <span
+   196→   196→                  className={cn(
+   197→   197→                    "tnum flex size-6 items-center justify-center rounded-full border text-[11px] font-semibold",
+   198→   198→                    done && "border-primary bg-primary text-primary-foreground",
+   199→   199→                    current && "border-primary bg-primary/[0.08] text-primary",
+   200→   200→                    !done && !current && "border-border bg-background text-muted-foreground",
+   201→   201→                  )}
+   202→   202→                >
+   203→   203→                  {done ? <Check className="size-3.5" aria-hidden /> : s.n}
+   204→   204→                </span>
+   205→   205→                {s.label}
+   206→   206→              </button>
+   207→   207→              {i < STEPS.length - 1 && <span className="h-px w-4 bg-border sm:w-7" aria-hidden />}
+   208→   208→            </li>
+   209→   209→          );
+   210→   210→        })}
+   211→   211→      </ol>
+   212→   212→
+   213→   213→      <form onSubmit={submit} className="space-y-5">
+   214→   214→        {/* ── Step 1: Review lines ── */}
+   215→   215→        {step === 1 && (
+   216→   216→          <SectionCard
+   217→   217→            title="Review items"
+   218→   218→            description="Quantities respect each product's minimum and multiples."
+   219→   219→            contentClassName="p-0 sm:p-0"
+   220→   220→          >
+   221→   221→            {/* Desktop table */}
+   222→   222→            <div className="hidden md:block">
+   223→   223→              <Table>
+   224→   224→                <TableHeader>
+   225→   225→                  <TableRow className="hover:bg-transparent">
+   226→   226→                    <TableHead className="w-[38%]">Product</TableHead>
+   227→   227→                    <TableHead className="text-right">Unit price</TableHead>
+   228→   228→                    <TableHead className="text-center">Quantity</TableHead>
+   229→   229→                    <TableHead className="text-right">Line total</TableHead>
+   230→   230→                    <TableHead className="w-12" />
+   231→   231→                  </TableRow>
+   232→   232→                </TableHeader>
+   233→   233→                <TableBody>
+   234→   234→                  {lines.map((l) => (
+   235→   235→                    <CartRow key={l.productId} line={l} setQty={setQty} removeLine={removeLine} />
+   236→   236→                  ))}
+   237→   237→                </TableBody>
+   238→   238→              </Table>
+   239→   239→            </div>
+   240→   240→            {/* Mobile stacked cards */}
+   241→   241→            <ul className="divide-y md:hidden">
+   242→   242→              {lines.map((l) => (
+   243→   243→                <li key={l.productId} className="flex flex-col gap-3 px-4 py-4">
+   244→   244→                  <div className="flex items-start justify-between gap-3">
+   245→   245→                    <div className="flex min-w-0 items-center gap-3">
+   246→   246→                      <ProductArtwork sku={l.sku} compact />
+   247→   247→                      <div className="min-w-0">
+   248→   248→                        <p className="truncate text-[13.5px] font-medium leading-snug">{l.name}</p>
+   249→   249→                        <Mono className="text-muted-foreground">{l.sku}</Mono>
+   250→   250→                      </div>
+   251→   251→                    </div>
+   252→   252→                    <Button
+   253→   253→                      variant="ghost"
+   254→   254→                      size="icon"
+   255→   255→                      className="size-8 shrink-0 text-muted-foreground hover:text-red-600"
+   256→   256→                      onClick={() => removeLine(l.productId)}
+   257→   257→                      aria-label={`Remove ${l.name} from cart`}
+   258→   258→                    >
+   259→   259→                      <Trash2 className="size-4" aria-hidden />
+   260→   260→                    </Button>
+   261→   261→                  </div>
+   262→   262→                  <div className="flex items-center justify-between gap-3">
+   263→   263→                    <QtyStepper
+   264→   264→                      value={l.qty}
+   265→   265→                      onChange={(q) => setQty(l.productId, q)}
+   266→   266→                      min={l.minOrderQty}
+   267→   267→                      increment={l.increment}
+   268→   268→                      size="sm"
+   269→   269→                      ariaLabel={`Quantity of ${l.name}`}
+   270→   270→                    />
+   271→   271→                    <div className="text-right">
+   272→   272→                      <Money cents={l.qty * l.unitPriceCents} className="text-[14px] font-semibold" />
+   273→   273→                      <p className="text-[11.5px] text-muted-foreground">
+   274→   274→                        <Money cents={l.unitPriceCents} muted /> per {l.unit}
+   275→   275→                      </p>
+   276→   276→                    </div>
+   277→   277→                  </div>
+   278→   278→                </li>
+   279→   279→              ))}
+   280→   280→            </ul>
+   281→   281→
+   282→   282→            <div className="border-t bg-muted/20 px-4 py-4 sm:px-5">
+   283→   283→              <CartTotals subtotal={subtotal} tax={tax} total={total} />
+   284→   284→            </div>
+   285→   285→          </SectionCard>
+   286→   286→        )}
+   287→   287→
+   288→   288→        {/* ── Step 2: Delivery ── */}
+   289→   289→        {step === 2 && (
+   290→   290→          <SectionCard title="Delivery details" description="Where should this order ship, and anything we should know?">
+   291→   291→            {accountError ? (
+   292→   292→              <ErrorAlert message="We could not load your shipping addresses." />
+   293→   293→            ) : accountLoading || !account ? (
+   294→   294→              <div className="space-y-3">
+   295→   295→                <Skeleton className="h-10 w-full" />
+   296→   296→                <Skeleton className="h-16 w-full" />
+   297→   297→                <Skeleton className="h-20 w-full" />
+   298→   298→              </div>
+   299→   299→            ) : (
+   300→   300→              <div className="space-y-4">
+   301→   301→                {addresses.length === 0 ? (
+   302→   302→                  <div className="rounded-md border border-amber-200 bg-amber-50/70 px-4 py-3 text-[13px] text-amber-800">
+   303→   303→                    No shipping addresses on file yet — add one in Settings before submitting.
+   304→   304→                  </div>
+   305→   305→                ) : (
+   306→   306→                  <>
+   307→   307→                    <div className="space-y-2">
+   308→   308→                      <Label htmlFor="cart-address">Shipping address</Label>
+   309→   309→                      <Select
+   310→   310→                        value={selectedAddress?.id ?? ""}
+   311→   311→                        onValueChange={(v) => setAddressId(v)}
+   312→   312→                      >
+   313→   313→                        <SelectTrigger id="cart-address" className="w-full sm:w-[380px]">
+   314→   314→                          <SelectValue placeholder="Choose an address" />
+   315→   315→                        </SelectTrigger>
+   316→   316→                        <SelectContent>
+   317→   317→                          {addresses.map((a) => (
+   318→   318→                            <SelectItem key={a.id} value={a.id}>
+   319→   319→                              {a.label}
+   320→   320→                              {a.isDefault ? " (default)" : ""}
+   321→   321→                            </SelectItem>
+   322→   322→                          ))}
+   323→   323→                        </SelectContent>
+   324→   324→                      </Select>
+   325→   325→                    </div>
+   326→   326→                    {selectedAddress && (
+   327→   327→                      <div className="rounded-md border bg-muted/30 px-4 py-3">
+   328→   328→                        <p className="flex items-center gap-1.5 text-[12px] font-medium uppercase tracking-[0.06em] text-muted-foreground">
+   329→   329→                          <Truck className="size-3.5" aria-hidden /> Ships to
+   330→   330→                        </p>
+   331→   331→                        <p className="mt-1.5 text-[13.5px] font-medium">{selectedAddress.label}</p>
+   332→   332→                        <p className="mt-0.5 text-[13px] text-muted-foreground">
+   333→   333→                          {selectedAddress.line1}
+   334→   334→                          {selectedAddress.line2 ? `, ${selectedAddress.line2}` : ""}
+   335→   335→                          <br />
+   336→   336→                          {selectedAddress.city}, {selectedAddress.province} {selectedAddress.postal}
+   337→   337→                        </p>
+   338→   338→                      </div>
+   339→   339→                    )}
+   340→   340→                    <button
+   341→   341→                      type="button"
+   342→   342→                      className="text-[12.5px] font-medium text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline"
+   343→   343→                      onClick={() => navigate("settings")}
+   344→   344→                    >
+   345→   345→                      Manage addresses in Settings
+   346→   346→                    </button>
+   347→   347→                  </>
+   348→   348→                )}
+   349→   349→                <div className="space-y-2">
+   350→   350→                  <Label htmlFor="cart-notes">Order notes</Label>
+   351→   351→                  <Textarea
+   352→   352→                    id="cart-notes"
+   353→   353→                    rows={3}
+   354→   354→                    maxLength={2000}
+   355→   355→                    placeholder="Anything our order desk should know — dock hours, receiving contacts, packaging preferences…"
+   356→   356→                    value={orderNotes}
+   357→   357→                    onChange={(e) => setOrderNotes(e.target.value)}
+   358→   358→                  />
+   359→   359→                </div>
+   360→   360→                <div className="max-w-md space-y-2">
+   361→   361→                  <Label htmlFor="cart-delivery">Requested delivery</Label>
+   362→   362→                  <Input
+   363→   363→                    id="cart-delivery"
+   364→   364→                    maxLength={200}
+   365→   365→                    placeholder="e.g. Before month end, or a specific date"
+   366→   366→                    value={requestedDelivery}
+   367→   367→                    onChange={(e) => setRequestedDelivery(e.target.value)}
+   368→   368→                  />
+   369→   369→                  <p className="text-[12px] text-muted-foreground">
+   370→   370→                    Requested only — we&apos;ll confirm the actual date when the order is confirmed.
+   371→   371→                  </p>
+   372→   372→                </div>
+   373→   373→              </div>
+   374→   374→            )}
+   375→   375→          </SectionCard>
+   376→   376→        )}
+   377→   377→
+   378→   378→        {/* ── Step 3: Reference ── */}
+   379→   379→        {step === 3 && (
+   380→   380→          <SectionCard title="Reference details" description="Optional — helps you match this request to your own records.">
+   381→   381→            <div className="space-y-4">
+   382→   382→              <div className="max-w-md space-y-2">
+   383→   383→                <Label htmlFor="cart-po">PO reference</Label>
+   384→   384→                <Input
+   385→   385→                  id="cart-po"
+   386→   386→                  maxLength={60}
+   387→   387→                  placeholder="e.g. MLP-PO-0918"
+   388→   388→                  value={poNumber}
+   389→   389→                  onChange={(e) => setPoNumber(e.target.value)}
+   390→   390→                />
+   391→   391→                <p className="text-[12px] text-muted-foreground">Your purchase order number, if one applies.</p>
+   392→   392→              </div>
+   393→   393→              <div className="space-y-2">
+   394→   394→                <Label htmlFor="cart-special">Special instructions</Label>
+   395→   395→                <Textarea
+   396→   396→                  id="cart-special"
+   397→   397→                  rows={4}
+   398→   398→                  maxLength={2000}
+   399→   399→                  placeholder="Handling, packing or delivery preferences beyond the order notes…"
+   400→   400→                  value={specialInstructions}
+   401→   401→                  onChange={(e) => setSpecialInstructions(e.target.value)}
+   402→   402→                />
+   403→   403→              </div>
+   404→   404→            </div>
+   405→   405→          </SectionCard>
+   406→   406→        )}
+   407→   407→
+   408→   408→        {/* ── Step 4: Review & submit ── */}
+   409→   409→        {step === 4 && (
+   410→   410→          <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
+   411→   411→            <SectionCard title="Final review" description="Check everything before submitting your request." contentClassName="p-0 sm:p-0">
+   412→   412→              <ul className="divide-y">
+   413→   413→                {lines.map((l) => (
+   414→   414→                  <li key={l.productId} className="flex items-center gap-3 px-4 py-3 sm:px-5">
+   415→   415→                    <ProductArtwork sku={l.sku} compact className="hidden sm:block" />
+   416→   416→                    <div className="min-w-0 flex-1">
+   417→   417→                      <p className="truncate text-[13.5px] font-medium">{l.name}</p>
+   418→   418→                      <p className="text-[12px] text-muted-foreground">
+   419→   419→                        <Mono>{l.sku}</Mono> · <span className="tnum">{l.qty.toLocaleString()}</span> ×{" "}
+   420→   420→                        <Money cents={l.unitPriceCents} muted />
+   421→   421→                      </p>
+   422→   422→                    </div>
+   423→   423→                    <Money cents={l.qty * l.unitPriceCents} className="text-[13.5px] font-medium" />
+   424→   424→                  </li>
+   425→   425→                ))}
+   426→   426→              </ul>
+   427→   427→              <div className="border-t bg-muted/20 px-4 py-4 sm:px-5">
+   428→   428→                <CartTotals subtotal={subtotal} tax={tax} total={total} />
+   429→   429→              </div>
+   430→   430→            </SectionCard>
+   431→   431→
+   432→   432→            <SectionCard title="Request summary">
+   433→   433→              <dl className="m-0 space-y-3 text-[13px]">
+   434→   434→                <div>
+   435→   435→                  <dt className="text-[12px] font-medium uppercase tracking-[0.06em] text-muted-foreground">Items</dt>
+   436→   436→                  <dd className="mt-0.5 text-foreground">
+   437→   437→                    {lines.length} product{lines.length === 1 ? "" : "s"} ·{" "}
+   438→   438→                    {lines.reduce((s, l) => s + l.qty, 0).toLocaleString()} units
+   439→   439→                  </dd>
+   440→   440→                </div>
+   441→   441→                <div>
+   442→   442→                  <dt className="text-[12px] font-medium uppercase tracking-[0.06em] text-muted-foreground">Ship to</dt>
+   443→   443→                  <dd className="mt-0.5 text-foreground">
+   444→   444→                    {selectedAddress ? (
+   445→   445→                      <>
+   446→   446→                        {selectedAddress.label}
+   447→   447→                        <span className="block text-muted-foreground">
+   448→   448→                          {selectedAddress.line1}
+   449→   449→                          {selectedAddress.line2 ? `, ${selectedAddress.line2}` : ""}
+   450→   450→                          {", "}
+   451→   451→                          {selectedAddress.city}, {selectedAddress.province} {selectedAddress.postal}
+   452→   452→                        </span>
+   453→   453→                      </>
+   454→   454→                    ) : (
+   455→   455→                      <span className="text-muted-foreground">No address selected</span>
+   456→   456→                    )}
+   457→   457→                  </dd>
+   458→   458→                </div>
+   459→   459→                {requestedDelivery.trim() && (
+   460→   460→                  <div>
+   461→   461→                    <dt className="text-[12px] font-medium uppercase tracking-[0.06em] text-muted-foreground">Requested delivery</dt>
+   462→   462→                    <dd className="mt-0.5 text-foreground">{requestedDelivery.trim()}</dd>
+   463→   463→                  </div>
+   464→   464→                )}
+   465→   465→                {poNumber.trim() && (
+   466→   466→                  <div>
+   467→   467→                    <dt className="text-[12px] font-medium uppercase tracking-[0.06em] text-muted-foreground">PO reference</dt>
+   468→   468→                    <dd className="mt-0.5 text-foreground">{poNumber.trim()}</dd>
+   469→   469→                  </div>
+   470→   470→                )}
+   471→   471→                {(orderNotes.trim() || specialInstructions.trim()) && (
+   472→   472→                  <div>
+   473→   473→                    <dt className="text-[12px] font-medium uppercase tracking-[0.06em] text-muted-foreground">Notes</dt>
+   474→   474→                    <dd className="mt-0.5 whitespace-pre-line text-muted-foreground">
+   475→   475→                      {[orderNotes.trim() && `Order notes: ${orderNotes.trim()}`, specialInstructions.trim() && `Special instructions: ${specialInstructions.trim()}`]
+   476→   476→                        .filter(Boolean)
+   477→   477→                        .join("\n\n")}
+   478→   478→                    </dd>
+   479→   479→                  </div>
+   480→   480→                )}
+   481→   481→              </dl>
+   482→   482→
+   483→   483→              <Separator className="my-4" />
+   484→   484→
+   485→   485→              {submitError && (
+   486→   486→                <div role="alert" className="mb-3 rounded-md border border-red-200 bg-red-50 px-3.5 py-2.5 text-[13px] text-red-700">
+   487→   487→                  {submitError}
+   488→   488→                </div>
+   489→   489→              )}
+   490→   490→              <Button
+   491→   491→                type="submit"
+   492→   492→                className="h-10 w-full gap-2"
+   493→   493→                disabled={submitMutation.isPending || addresses.length === 0}
+   494→   494→              >
+   495→   495→                {submitMutation.isPending ? (
+   496→   496→                  <>
+   497→   497→                    <Loader2 className="size-4 animate-spin" aria-hidden /> Submitting…
+   498→   498→                  </>
+   499→   499→                ) : (
+   500→   500→                  <>
+   501→   501→                    <Check className="size-4" aria-hidden /> Submit order request
+   502→   502→                  </>
+   503→   503→                )}
+   504→   504→              </Button>
+   505→   505→              <p className="mt-3 text-[12px] leading-relaxed text-muted-foreground">
+   506→   506→                No goods are promised or reserved at this point. Our order desk reviews availability and
+   507→   507→                pricing, then confirms with you before production.
+   508→   508→              </p>
+   509→   509→            </SectionCard>
+   510→   510→          </div>
+   511→   511→        )}
+   512→   512→
+   513→   513→        {/* Step navigation */}
+   514→   514→        <div className="flex items-center justify-between gap-3">
+   515→   515→          {step > 1 ? (
+   516→   516→            <Button
+   517→   517→              type="button"
+   518→   518→              variant="outline"
+   519→   519→              className="gap-1.5"
+   520→   520→              onClick={() => goTo(step - 1)}
+   521→   521→              disabled={submitMutation.isPending}
+   522→   522→            >
+   523→   523→              <ArrowLeft className="size-4" aria-hidden /> Back
+   524→   524→            </Button>
+   525→   525→          ) : (
+   526→   526→            <span />
+   527→   527→          )}
+   528→   528→          {step < 4 && (
+   529→   529→            <Button type="button" className="gap-1.5" onClick={() => goTo(step + 1)}>
+   530→   530→              Continue <ArrowRight className="size-4" aria-hidden />
+   531→   531→            </Button>
+   532→   532→          )}
+   533→   533→        </div>
+   534→   534→      </form>
+   535→   535→    </div>
+   536→   536→  );
+   537→   537→}
+   538→   538→
+   539→   539→function CartRow({
+   540→   540→  line,
+   541→   541→  setQty,
+   542→   542→  removeLine,
+   543→   543→}: {
+   544→   544→  line: CartLine;
+   545→   545→  setQty: (productId: string, qty: number) => void;
+   546→   546→  removeLine: (productId: string) => void;
+   547→   547→}) {
+   548→   548→  return (
+   549→   549→    <TableRow>
+   550→   550→      <TableCell>
+   551→   551→        <div className="flex items-center gap-3">
+   552→   552→          <ProductArtwork sku={line.sku} compact />
+   553→   553→          <div className="min-w-0">
+   554→   554→            <p className="truncate text-[13.5px] font-medium leading-snug">{line.name}</p>
+   555→   555→            <Mono className="text-muted-foreground">{line.sku}</Mono>
+   556→   556→          </div>
+   557→   557→        </div>
+   558→   558→      </TableCell>
+   559→   559→      <TableCell className="text-right">
+   560→   560→        <Money cents={line.unitPriceCents} />
+   561→   561→        <p className="text-[11px] text-muted-foreground">per {line.unit}</p>
+   562→   562→      </TableCell>
+   563→   563→      <TableCell>
+   564→   564→        <div className="flex justify-center">
+   565→   565→          <QtyStepper
+   566→   566→            value={line.qty}
+   567→   567→            onChange={(q) => setQty(line.productId, q)}
+   568→   568→            min={line.minOrderQty}
+   569→   569→            increment={line.increment}
+   570→   570→            size="sm"
+   571→   571→            ariaLabel={`Quantity of ${line.name}`}
+   572→   572→          />
+   573→   573→        </div>
+   574→   574→        <p className="mt-1 text-center text-[11px] text-muted-foreground">
+   575→   575→          min {line.minOrderQty.toLocaleString()} · +{line.increment.toLocaleString()}
+   576→   576→        </p>
+   577→   577→      </TableCell>
+   578→   578→      <TableCell className="text-right">
+   579→   579→        <Money cents={line.qty * line.unitPriceCents} className="font-medium" />
+   580→   580→      </TableCell>
+   581→   581→      <TableCell className="text-right">
+   582→   582→        <Button
+   583→   583→          variant="ghost"
+   584→   584→          size="icon"
+   585→   585→          className="size-8 text-muted-foreground hover:text-red-600"
+   586→   586→          onClick={() => removeLine(line.productId)}
+   587→   587→          aria-label={`Remove ${line.name} from cart`}
+   588→   588→        >
+   589→   589→          <Trash2 className="size-4" aria-hidden />
+   590→   590→        </Button>
+   591→   591→      </TableCell>
+   592→   592→    </TableRow>
+   593→   593→  );
+   594→   594→}
+   595→   595→
+   596→   596→function CartTotals({ subtotal, tax, total }: { subtotal: number; tax: number; total: number }) {
+   597→   597→  const rateLabel = useMemo(() => `${DEFAULT_TAX_RATE_BP / 100}%`, []);
+   598→   598→  return (
+   599→   599→    <div className="ml-auto w-full max-w-xs space-y-1.5">
+   600→   600→      <div className="flex items-baseline justify-between text-[13px]">
+   601→   601→        <span className="text-muted-foreground">Subtotal</span>
+   602→   602→        <MoneyWithCode cents={subtotal} />
+   603→   603→      </div>
+   604→   604→      <div className="flex items-baseline justify-between text-[13px]">
+   605→   605→        <span className="text-muted-foreground">Estimated GST ({rateLabel})</span>
+   606→   606→        <MoneyWithCode cents={tax} />
+   607→   607→      </div>
+   608→   608→      <Separator className="my-2" />
+   609→   609→      <div className="flex items-baseline justify-between">
+   610→   610→        <span className="text-[13.5px] font-medium">Estimated total</span>
+   611→   611→        <MoneyWithCode cents={total} className="text-[15px] font-semibold" />
+   612→   612→      </div>
+   613→   613→      <p className="pt-1 text-right text-[11px] text-muted-foreground">
+   614→   614→        Taxes are estimated — final tax is computed on the confirmed order.
+   615→   615→      </p>
+   616→   616→    </div>
+   617→   617→  );
+   618→   618→}
+   619→   619→

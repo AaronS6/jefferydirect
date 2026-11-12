@@ -1,0 +1,960 @@
+     1→"use client";
+     2→
+     3→// Order detail — requested vs confirmed information, items (with per-line
+     4→// specs and attachment references), totals, published progress updates,
+     5→// change requests (including counter proposals), status timeline, documents,
+     6→// CSV export / print, and the canonical reorder flow (current pricing only).
+     7→
+     8→import { Fragment, useState } from "react";
+     9→import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+    10→import { motion, useReducedMotion } from "framer-motion";
+    11→import {
+    12→  CalendarClock,
+    13→  Check,
+    14→  ChevronDown,
+    15→  ChevronRight,
+    16→  Download,
+    17→  FilePen,
+    18→  FileText,
+    19→  Loader2,
+    20→  MapPin,
+    21→  MessageSquare,
+    22→  Printer,
+    23→  RefreshCcw,
+    24→  StickyNote,
+    25→  TriangleAlert,
+    26→} from "lucide-react";
+    27→import { Button } from "@/components/ui/button";
+    28→import {
+    29→  AlertDialog,
+    30→  AlertDialogAction,
+    31→  AlertDialogCancel,
+    32→  AlertDialogContent,
+    33→  AlertDialogDescription,
+    34→  AlertDialogFooter,
+    35→  AlertDialogHeader,
+    36→  AlertDialogTitle,
+    37→} from "@/components/ui/alert-dialog";
+    38→import {
+    39→  Dialog,
+    40→  DialogContent,
+    41→  DialogDescription,
+    42→  DialogFooter,
+    43→  DialogHeader,
+    44→  DialogTitle,
+    45→} from "@/components/ui/dialog";
+    46→import {
+    47→  DropdownMenu,
+    48→  DropdownMenuContent,
+    49→  DropdownMenuItem,
+    50→  DropdownMenuTrigger,
+    51→} from "@/components/ui/dropdown-menu";
+    52→import { Separator } from "@/components/ui/separator";
+    53→import { Skeleton } from "@/components/ui/skeleton";
+    54→import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+    55→import { PageHeader } from "@/components/shared/page-header";
+    56→import { Money, MoneyWithCode } from "@/components/shared/money";
+    57→import { StatusBadge, ChangeStatusBadge, OrderSourceBadge } from "@/components/shared/status-badge";
+    58→import { OrderTimeline } from "@/components/shared/order-timeline";
+    59→import { UpdateTimeline } from "@/components/shared/update-timeline";
+    60→import { api, downloadFile } from "@/lib/api-client";
+    61→import { useAppStore, useCartStore } from "@/store/app-store";
+    62→import type { ChangeRequestDto, OrderDetail, OrderHistoryEntry, ReorderDraft } from "@/types";
+    63→import { toast } from "@/hooks/use-toast";
+    64→import { formatDate, formatDateTime } from "@/lib/date";
+    65→import {
+    66→  ORDER_STATUSES,
+    67→  ORDER_STATUS_LABELS,
+    68→  ORDER_SOURCE_LABELS,
+    69→  ORDER_TERMINAL_STATUSES,
+    70→  type ChangeKind,
+    71→} from "@/lib/constants";
+    72→import { cn } from "@/lib/utils";
+    73→import { ErrorAlert, errorMessage, Mono, RowsSkeleton, SectionCard, SummaryItem, Chip } from "./portal-bits";
+    74→import { AttachmentChips, SpecChips } from "./order-builder-bits";
+    75→import { ChangeRequestDialog, changeItemText, type RespondAction } from "./change-request-dialog";
+    76→
+    77→const EASE = [0.22, 1, 0.36, 1] as const;
+    78→
+    79→// Order progress hero — the full nine-step rail at xl and up; a compact
+    80→// progress bar below xl (the vertical timeline below carries full history).
+    81→// Ink dots for completed steps, kraft ring on the current one, hollow future.
+    82→function StatusStepper({ status, history }: { status: string; history: OrderHistoryEntry[] }) {
+    83→  const flow = ORDER_STATUSES;
+    84→  const terminal = ORDER_TERMINAL_STATUSES.includes(status);
+    85→  const currentIdx = flow.indexOf(status as (typeof flow)[number]);
+    86→
+    87→  // Latest history entry per status (ascending order).
+    88→  const latestByStatus = new Map<string, OrderHistoryEntry>();
+    89→  for (const h of [...history].sort((a, b) => a.createdAt.localeCompare(b.createdAt))) {
+    90→    latestByStatus.set(h.status, h);
+    91→  }
+    92→
+    93→  const progress =
+    94→    currentIdx >= 0 ? Math.round(((currentIdx + 1) / flow.length) * 100) : 100;
+    95→  const dead = status === "CANCELLED" || status === "REJECTED";
+    96→
+    97→  return (
+    98→    <>
+    99→      {/* Compact progress — below xl */}
+   100→      <div className="flex flex-wrap items-center gap-x-4 gap-y-2.5 xl:hidden" aria-label="Order progress">
+   101→        <span
+   102→          aria-hidden
+   103→          className={cn(
+   104→            "flex size-[14px] shrink-0 items-center justify-center rounded-full",
+   105→            dead
+   106→              ? "border-2 border-[var(--status-danger-dot)] bg-[var(--status-danger-bg)]"
+   107→              : terminal
+   108→                ? "bg-foreground"
+   109→                : "border-2 border-kraft-strong bg-kraft",
+   110→          )}
+   111→        >
+   112→          {!dead && !terminal && <span className="size-1.5 rounded-full bg-background" aria-hidden />}
+   113→          {terminal && <span className="size-[4.5px] rounded-full bg-background" aria-hidden />}
+   114→        </span>
+   115→        <p className="text-body font-semibold text-foreground">
+   116→          {ORDER_STATUS_LABELS[status] ?? status}
+   117→        </p>
+   118→        {!dead && (
+   119→          <p className="text-caption text-muted-foreground">
+   120→            <span className="tnum">Step {Math.max(1, currentIdx + 1)} of {flow.length}</span>
+   121→          </p>
+   122→        )}
+   123→        <div className="h-1.5 min-w-24 flex-1 overflow-hidden rounded-full bg-secondary" aria-hidden>
+   124→          <div
+   125→            className={cn("h-full rounded-full transition-[width] duration-500", dead ? "bg-[var(--status-danger-dot)]" : "bg-kraft-strong")}
+   126→            style={{ width: `${dead ? 100 : progress}%` }}
+   127→          />
+   128→        </div>
+   129→      </div>
+   130→
+   131→      {/* Full rail — xl and up */}
+   132→      <ol className="hidden items-start xl:flex" aria-label="Order progress steps">
+   133→        {flow.map((s, i) => {
+   134→          const entry = latestByStatus.get(s);
+   135→          const done = i < currentIdx || (terminal && entry !== undefined);
+   136→          const current = i === currentIdx && !terminal;
+   137→          return (
+   138→            <li
+   139→              key={s}
+   140→              className="relative flex min-w-[96px] flex-1 basis-0 flex-col items-center gap-2.5 px-1 text-center"
+   141→            >
+   142→              {i < flow.length - 1 && (
+   143→                <span
+   144→                  aria-hidden
+   145→                  className={cn(
+   146→                    "absolute top-[7px] left-[calc(50%+10px)] h-px w-[calc(100%-20px)]",
+   147→                    done || current ? "bg-foreground/25" : "bg-border",
+   148→                  )}
+   149→                />
+   150→              )}
+   151→              <span
+   152→                className={cn(
+   153→                  "relative z-10 flex size-[14px] shrink-0 items-center justify-center rounded-full",
+   154→                  done
+   155→                    ? "bg-foreground"
+   156→                    : current
+   157→                      ? "border-2 border-kraft-strong bg-kraft"
+   158→                      : "border border-border bg-card",
+   159→                )}
+   160→              >
+   161→                {done && <span className="size-[4.5px] rounded-full bg-background" aria-hidden />}
+   162→              </span>
+   163→              <div className="min-w-0 max-w-full">
+   164→                <p
+   165→                  className={cn(
+   166→                    "text-caption max-w-full truncate whitespace-nowrap",
+   167→                    current
+   168→                      ? "font-semibold text-foreground"
+   169→                      : done
+   170→                        ? "font-medium text-foreground/80"
+   171→                        : "font-medium text-muted-foreground",
+   172→                  )}
+   173→                >
+   174→                  {ORDER_STATUS_LABELS[s]}
+   175→                </p>
+   176→                {entry && (
+   177→                  <p className="tnum text-caption whitespace-nowrap text-muted-foreground">
+   178→                    {formatDate(entry.createdAt)}
+   179→                  </p>
+   180→                )}
+   181→              </div>
+   182→            </li>
+   183→          );
+   184→        })}
+   185→      </ol>
+   186→    </>
+   187→  );
+   188→}
+   189→
+   190→const QUICK_CHANGE_KINDS: { kind: ChangeKind; label: string }[] = [
+   191→  { kind: "QUANTITY", label: "Quantity" },
+   192→  { kind: "SPEC", label: "Specifications" },
+   193→  { kind: "ADD", label: "Add/remove products" },
+   194→  { kind: "ADDRESS", label: "Delivery address" },
+   195→  { kind: "DATE", label: "Delivery date" },
+   196→  { kind: "CANCEL", label: "Cancel order" },
+   197→];
+   198→
+   199→export function OrderDetailView({ orderId }: { orderId: string }) {
+   200→  const back = useAppStore((s) => s.back);
+   201→  const navigate = useAppStore((s) => s.navigate);
+   202→  const loadDraft = useCartStore((s) => s.loadDraft);
+   203→  const queryClient = useQueryClient();
+   204→  const reduce = useReducedMotion();
+   205→  const enter = {
+   206→    initial: { opacity: 0, y: reduce ? 0 : 8 },
+   207→    animate: { opacity: 1, y: 0 },
+   208→    transition: { duration: 0.22, ease: EASE },
+   209→  };
+   210→
+   211→  const [confirmOpen, setConfirmOpen] = useState(false);
+   212→  const [unavailableDraft, setUnavailableDraft] = useState<ReorderDraft | null>(null);
+   213→  const [reorderError, setReorderError] = useState<string | null>(null);
+   214→  const [changeOpen, setChangeOpen] = useState(false);
+   215→  const [changeKind, setChangeKind] = useState<ChangeKind | undefined>(undefined);
+   216→
+   217→  const { data: order, isLoading, error, refetch } = useQuery({
+   218→    queryKey: ["orders", "detail", orderId],
+   219→    queryFn: () => api.get<OrderDetail>(`/api/customer/orders/${orderId}`),
+   220→  });
+   221→
+   222→  const reorderMutation = useMutation({
+   223→    mutationFn: () => api.get<ReorderDraft>(`/api/customer/orders/${orderId}/reorder-data`),
+   224→    onSuccess: (draft) => {
+   225→      if (draft.lines.some((l) => l.unavailable)) {
+   226→        setUnavailableDraft(draft);
+   227→      } else {
+   228→        finishReorder(draft);
+   229→      }
+   230→    },
+   231→    onError: (err) =>
+   232→      setReorderError(err instanceof Error ? err.message : "We could not load reorder data."),
+   233→  });
+   234→
+   235→  const exportMutation = useMutation({
+   236→    mutationFn: (orderNumber: string) =>
+   237→      downloadFile(`/api/customer/orders/${orderId}/export`, `${orderNumber}.csv`),
+   238→    onSuccess: () => toast({ title: "Order exported" }),
+   239→    onError: (err) =>
+   240→      toast({
+   241→        title: "Export failed",
+   242→        description: errorMessage(err, "Please try again."),
+   243→        variant: "destructive",
+   244→      }),
+   245→  });
+   246→
+   247→  function finishReorder(draft: ReorderDraft) {
+   248→    const available = draft.lines.filter((l) => !l.unavailable);
+   249→    if (available.length === 0) {
+   250→      setUnavailableDraft(draft);
+   251→      return;
+   252→    }
+   253→    loadDraft(available);
+   254→    queryClient.invalidateQueries({ queryKey: ["orders"] });
+   255→    toast({ title: "Added to cart" });
+   256→    navigate("cart");
+   257→  }
+   258→
+   259→  if (error) {
+   260→    return (
+   261→      <motion.div {...enter}>
+   262→        <PageHeader title="Order" onBack={back} />
+   263→        <ErrorAlert
+   264→          message={error instanceof Error ? error.message : "We could not load this order."}
+   265→          onRetry={() => refetch()}
+   266→        />
+   267→        <div className="mt-4">
+   268→          <Button variant="outline" onClick={() => navigate("orders")}>
+   269→            Back to orders
+   270→          </Button>
+   271→        </div>
+   272→      </motion.div>
+   273→    );
+   274→  }
+   275→
+   276→  if (isLoading || !order) {
+   277→    return (
+   278→      <motion.div {...enter}>
+   279→        <PageHeader title="Order" onBack={back} />
+   280→        <div className="space-y-8">
+   281→          <div className="rounded-[14px] border bg-card p-5 shadow-xs">
+   282→            <Skeleton className="h-4 w-40" />
+   283→            <div className="mt-3 grid grid-cols-1 gap-x-8 sm:grid-cols-3">
+   284→              {Array.from({ length: 6 }).map((_, i) => (
+   285→                <div key={i} className="py-3">
+   286→                  <Skeleton className="h-3 w-24" />
+   287→                  <Skeleton className="mt-1.5 h-4 w-32" />
+   288→                </div>
+   289→              ))}
+   290→            </div>
+   291→          </div>
+   292→          <div className="rounded-[14px] border bg-card p-5 shadow-xs">
+   293→            <RowsSkeleton rows={3} />
+   294→          </div>
+   295→        </div>
+   296→      </motion.div>
+   297→    );
+   298→  }
+   299→
+   300→  const taxRateLabel = `${order.taxRateBp / 100}%`;
+   301→  const terminal = ORDER_TERMINAL_STATUSES.includes(order.status);
+   302→
+   303→  function openChangeDialog(kind?: ChangeKind) {
+   304→    setChangeKind(kind);
+   305→    setChangeOpen(true);
+   306→  }
+   307→
+   308→  return (
+   309→    <motion.div {...enter}>
+   310→      <PageHeader
+   311→        title={<Mono className="text-heading tracking-tight">{order.orderNumber}</Mono>}
+   312→        onBack={back}
+   313→        actions={
+   314→          <>
+   315→            <StatusBadge status={order.status} kind="order" />
+   316→            {(order.estimatedDelivery || order.revisedDeliveryDate) && (
+   317→              <span
+   318→                className={cn(
+   319→                  "inline-flex h-[22px] shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 text-caption font-medium",
+   320→                  order.revisedDeliveryDate
+   321→                    ? "border border-kraft/40 bg-kraft-soft text-kraft-ink"
+   322→                    : "border text-muted-foreground",
+   323→                )}
+   324→                title={
+   325→                  order.revisedDeliveryDate && order.estimatedDelivery
+   326→                    ? `Revised. Originally estimated ${formatDate(order.estimatedDelivery)}`
+   327→                    : undefined
+   328→                }
+   329→              >
+   330→                Est. delivery{" "}
+   331→                <span className="tnum font-semibold">
+   332→                  {formatDate(order.revisedDeliveryDate ?? order.estimatedDelivery)}
+   333→                </span>
+   334→                {order.revisedDeliveryDate && <span aria-hidden>· revised</span>}
+   335→              </span>
+   336→            )}
+   337→            {!terminal && (
+   338→              <Button
+   339→                className="gap-2 print:hidden"
+   340→                onClick={() => openChangeDialog()}
+   341→                aria-label="Request a change to this order"
+   342→              >
+   343→                <FilePen className="size-4" aria-hidden />
+   344→                <span className="hidden sm:inline">Request a change</span>
+   345→              </Button>
+   346→            )}
+   347→            <Button
+   348→              variant="outline"
+   349→              className="gap-2 print:hidden"
+   350→              onClick={() => navigate("support")}
+   351→              aria-label="Message our team about this order"
+   352→            >
+   353→              <MessageSquare className="size-4" aria-hidden />
+   354→              <span className="hidden sm:inline">Message</span>
+   355→            </Button>
+   356→            <DropdownMenu>
+   357→              <DropdownMenuTrigger asChild>
+   358→                <Button variant="outline" className="gap-1.5 print:hidden" aria-label="Export this order">
+   359→                  <Download className="size-4" aria-hidden />
+   360→                  <span className="hidden sm:inline">Export</span>
+   361→                  <ChevronDown className="size-3.5" aria-hidden />
+   362→                </Button>
+   363→              </DropdownMenuTrigger>
+   364→              <DropdownMenuContent align="end">
+   365→                <DropdownMenuItem
+   366→                  disabled={exportMutation.isPending}
+   367→                  onClick={() => exportMutation.mutate(order.orderNumber)}
+   368→                >
+   369→                  {exportMutation.isPending ? (
+   370→                    <Loader2 className="size-4 animate-spin" aria-hidden />
+   371→                  ) : (
+   372→                    <Download className="size-4" aria-hidden />
+   373→                  )}
+   374→                  Download CSV
+   375→                </DropdownMenuItem>
+   376→                <DropdownMenuItem onClick={() => window.print()}>
+   377→                  <Printer className="size-4" aria-hidden />
+   378→                  Print order
+   379→                </DropdownMenuItem>
+   380→              </DropdownMenuContent>
+   381→            </DropdownMenu>
+   382→            {order.items.length > 0 && (
+   383→              <Button
+   384→                className="gap-2 print:hidden"
+   385→                onClick={() => {
+   386→                  setReorderError(null);
+   387→                  setConfirmOpen(true);
+   388→                }}
+   389→              >
+   390→                <RefreshCcw className="size-4" aria-hidden />
+   391→                <span className="hidden sm:inline">Reorder</span>
+   392→              </Button>
+   393→            )}
+   394→          </>
+   395→        }
+   396→      />
+   397→
+   398→      <div className="space-y-8">
+   399→        {/* ── Progress hero — horizontal stepper ── */}
+   400→        <SectionCard className="print:break-inside-avoid">
+   401→          <StatusStepper status={order.status} history={order.history} />
+   402→        </SectionCard>
+   403→
+   404→        {/* Next expected update — only when the team committed to one */}
+   405→        {order.nextUpdateDate && !terminal && (
+   406→          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-[14px] border bg-card px-5 py-3 shadow-xs print:shadow-none">
+   407→            <CalendarClock className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+   408→            <div className="min-w-0 flex-1">
+   409→              <p className="text-micro text-muted-foreground">Next update</p>
+   410→              <p className="mt-0.5 text-body-sm leading-relaxed text-foreground">
+   411→                Expected by <span className="tnum font-medium">{formatDate(order.nextUpdateDate)}</span>.
+   412→              </p>
+   413→            </div>
+   414→          </div>
+   415→        )}
+   416→
+   417→        {/* ── Summary grid ── */}
+   418→        <SectionCard title="Order details">
+   419→          <dl className="m-0 grid grid-cols-1 gap-x-8 sm:grid-cols-2 lg:grid-cols-3">
+   420→            <SummaryItem label="Submitted">{formatDate(order.createdAt)}</SummaryItem>
+   421→            <SummaryItem label="Submitted by">{order.submittedBy}</SummaryItem>
+   422→            {order.poNumber && <SummaryItem label="PO reference">{order.poNumber}</SummaryItem>}
+   423→            {order.requestedDelivery && (
+   424→              <SummaryItem label="Requested delivery">{order.requestedDelivery}</SummaryItem>
+   425→            )}
+   426→            {order.requestedDeliveryDate && (
+   427→              <SummaryItem label="Requested delivery">
+   428→                {formatDate(order.requestedDeliveryDate)}
+   429→                <span className="block text-caption text-muted-foreground">
+   430→                  Requested, not confirmed.
+   431→                </span>
+   432→              </SummaryItem>
+   433→            )}
+   434→            {order.estimatedDispatch && (
+   435→              <SummaryItem label="Est. dispatch">{formatDate(order.estimatedDispatch)}</SummaryItem>
+   436→            )}
+   437→            {order.estimatedDelivery && (
+   438→              <SummaryItem label="Est. delivery">{formatDate(order.estimatedDelivery)}</SummaryItem>
+   439→            )}
+   440→            {order.revisedDeliveryDate && (
+   441→              <SummaryItem label="Revised delivery">
+   442→                <span className="font-medium text-kraft-ink">{formatDate(order.revisedDeliveryDate)}</span>
+   443→              </SummaryItem>
+   444→            )}
+   445→            {order.actualDeliveryDate && (
+   446→              <SummaryItem label="Delivered">{formatDate(order.actualDeliveryDate)}</SummaryItem>
+   447→            )}
+   448→            {order.trackingNumber && (
+   449→              <SummaryItem label="Tracking number">
+   450→                <Mono className="text-body-sm">{order.trackingNumber}</Mono>
+   451→              </SummaryItem>
+   452→            )}
+   453→            {order.sourceType !== "PORTAL" && (
+   454→              <SummaryItem label="Order source">
+   455→                <span className="flex flex-wrap items-center gap-2">
+   456→                  <OrderSourceBadge source={order.sourceType} />
+   457→                  <span className="text-caption leading-relaxed text-muted-foreground">
+   458→                    {ORDER_SOURCE_LABELS[order.sourceType] ?? order.sourceType}
+   459→                    {order.recordedByName ? ` · recorded by ${order.recordedByName}` : ""}. Placed outside
+   460→                    ClientHub; recorded here for tracking.
+   461→                  </span>
+   462→                </span>
+   463→              </SummaryItem>
+   464→            )}
+   465→            {order.reorderSource && (
+   466→              <SummaryItem label="Reorder source">Reorder of {order.reorderSource}</SummaryItem>
+   467→            )}
+   468→          </dl>
+   469→        </SectionCard>
+   470→
+   471→        <div className="grid grid-cols-1 gap-8 xl:grid-cols-[minmax(0,1fr)_340px]">
+   472→          {/* ── Main column ── */}
+   473→          <div className="min-w-0 space-y-8">
+   474→            {/* Items */}
+   475→            <SectionCard
+   476→              title="Items"
+   477→              contentClassName="p-0 sm:p-0"
+   478→              className="print:break-inside-avoid"
+   479→            >
+   480→              {/* Desktop table */}
+   481→              <div className="hidden md:block">
+   482→                <Table>
+   483→                  <TableHeader>
+   484→                    <TableRow className="hover:bg-transparent">
+   485→                      <TableHead>Product</TableHead>
+   486→                      <TableHead className="text-right">Qty</TableHead>
+   487→                      <TableHead className="text-right">Unit price</TableHead>
+   488→                      <TableHead className="text-right">Line total</TableHead>
+   489→                    </TableRow>
+   490→                  </TableHeader>
+   491→                  <TableBody>
+   492→                    {order.items.map((item) => (
+   493→                      <TableRow key={item.id}>
+   494→                        <TableCell>
+   495→                          <ItemIdentity item={item} navigate={navigate} />
+   496→                          {item.note && (
+   497→                            <span className="mt-0.5 block text-caption text-muted-foreground">{item.note}</span>
+   498→                          )}
+   499→                          <SpecChips specs={item.specs} />
+   500→                          <AttachmentChips attachments={item.attachments} />
+   501→                        </TableCell>
+   502→                        <TableCell className="tnum whitespace-nowrap text-right text-body-sm">{item.qty.toLocaleString()}</TableCell>
+   503→                        <TableCell className="whitespace-nowrap text-right">
+   504→                          {item.productId ? (
+   505→                            <Money cents={item.unitPriceCents} />
+   506→                          ) : (
+   507→                            <span className="text-caption text-muted-foreground">Pricing to be confirmed</span>
+   508→                          )}
+   509→                        </TableCell>
+   510→                        <TableCell className="whitespace-nowrap text-right">
+   511→                          {item.productId ? (
+   512→                            <Money cents={item.lineTotalCents} className="font-medium" />
+   513→                          ) : null}
+   514→                        </TableCell>
+   515→                      </TableRow>
+   516→                    ))}
+   517→                  </TableBody>
+   518→                </Table>
+   519→              </div>
+   520→              {/* Mobile stacked */}
+   521→              <ul className="divide-y md:hidden">
+   522→                {order.items.map((item) => (
+   523→                  <li key={item.id} className="px-5 py-3.5">
+   524→                    <div className="flex items-start justify-between gap-3">
+   525→                      <div className="min-w-0">
+   526→                        <ItemIdentity item={item} navigate={navigate} />
+   527→                        {item.note && (
+   528→                          <span className="mt-0.5 block text-caption text-muted-foreground">{item.note}</span>
+   529→                        )}
+   530→                        <SpecChips specs={item.specs} />
+   531→                        <AttachmentChips attachments={item.attachments} />
+   532→                      </div>
+   533→                      <div className="shrink-0 text-right">
+   534→                        {item.productId ? (
+   535→                          <>
+   536→                            <Money cents={item.lineTotalCents} className="text-body-sm font-semibold" />
+   537→                            <p className="text-caption text-muted-foreground">
+   538→                              <span className="tnum">{item.qty.toLocaleString()}</span> ×{" "}
+   539→                              <Money cents={item.unitPriceCents} muted />
+   540→                            </p>
+   541→                          </>
+   542→                        ) : (
+   543→                          <>
+   544→                            <span className="text-caption text-muted-foreground">Pricing to be confirmed</span>
+   545→                            <p className="text-caption text-muted-foreground">
+   546→                              <span className="tnum">{item.qty.toLocaleString()}</span> units
+   547→                            </p>
+   548→                          </>
+   549→                        )}
+   550→                      </div>
+   551→                    </div>
+   552→                  </li>
+   553→                ))}
+   554→              </ul>
+   555→            </SectionCard>
+   556→
+   557→            {/* Progress updates */}
+   558→            <SectionCard
+   559→              title="Order updates"
+   560→              className="print:break-inside-avoid"
+   561→            >
+   562→              <UpdateTimeline updates={order.updates} />
+   563→            </SectionCard>
+   564→
+   565→            {/* Change requests */}
+   566→            {order.changeRequests.length > 0 && (
+   567→              <ChangeRequestsCard orderId={orderId} requests={order.changeRequests} />
+   568→            )}
+   569→
+   570→            {/* Timeline */}
+   571→            <SectionCard title="Status timeline">
+   572→              <OrderTimeline status={order.status} history={order.history} />
+   573→            </SectionCard>
+   574→          </div>
+   575→
+   576→          {/* ── Side rail ── */}
+   577→          <aside className="space-y-8" aria-label="Shipping and documents">
+   578→            <SectionCard title="Totals" className="print:break-inside-avoid">
+   579→              <div className="w-full space-y-1.5">
+   580→                <div className="flex items-baseline justify-between text-body-sm">
+   581→                  <span className="text-muted-foreground">Subtotal</span>
+   582→                  <MoneyWithCode cents={order.subtotalCents} />
+   583→                </div>
+   584→                <div className="flex items-baseline justify-between text-body-sm">
+   585→                  <span className="text-muted-foreground">GST ({taxRateLabel})</span>
+   586→                  <MoneyWithCode cents={order.taxCents} />
+   587→                </div>
+   588→                <Separator className="my-2" />
+   589→                <div className="flex items-baseline justify-between">
+   590→                  <span className="text-body-sm font-medium">Total</span>
+   591→                  <MoneyWithCode cents={order.totalCents} className="font-display text-title font-normal" />
+   592→                </div>
+   593→              </div>
+   594→            </SectionCard>
+   595→
+   596→            <SectionCard title="Shipping" className="print:break-inside-avoid">
+   597→              <div className="flex items-start gap-2.5">
+   598→                <MapPin className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+   599→                <p className="text-body-sm leading-relaxed text-foreground">{order.shippingText}</p>
+   600→              </div>
+   601→              {order.notes && (
+   602→                <>
+   603→                  <Separator className="my-4" />
+   604→                  <div className="flex items-start gap-2.5">
+   605→                    <StickyNote className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+   606→                    <div>
+   607→                      <p className="text-micro text-muted-foreground">Notes</p>
+   608→                      <p className="mt-1 whitespace-pre-line text-body-sm leading-relaxed text-foreground">
+   609→                        {order.notes}
+   610→                      </p>
+   611→                    </div>
+   612→                  </div>
+   613→                </>
+   614→              )}
+   615→            </SectionCard>
+   616→
+   617→            {!terminal && (
+   618→              <SectionCard title="Request a change" className="print:hidden">
+   619→                <ul className="space-y-1">
+   620→                  {QUICK_CHANGE_KINDS.map((q) => (
+   621→                    <li key={q.kind}>
+   622→                      <button
+   623→                        type="button"
+   624→                        onClick={() => openChangeDialog(q.kind)}
+   625→                        className="flex w-full items-center justify-between gap-2 rounded-[10px] border bg-card px-3 py-2 text-left text-body-sm font-medium text-foreground transition-colors hover:bg-accent/70 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/35"
+   626→                      >
+   627→                        {q.label}
+   628→                        <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+   629→                      </button>
+   630→                    </li>
+   631→                  ))}
+   632→                </ul>
+   633→              </SectionCard>
+   634→            )}
+   635→
+   636→            {order.documents.length > 0 && (
+   637→              <SectionCard title="Related documents" className="print:break-inside-avoid">
+   638→                <ul className="space-y-2">
+   639→                  {order.documents.map((doc) => (
+   640→                    <li key={doc.id}>
+   641→                      <button
+   642→                        onClick={() => navigate("documents")}
+   643→                        className="flex w-full items-center gap-2.5 rounded-[10px] border bg-card px-3 py-2.5 text-left text-body-sm transition-colors hover:bg-accent/70 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/35"
+   644→                      >
+   645→                        <FileText className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+   646→                        <span className="min-w-0 flex-1 truncate font-medium text-foreground">{doc.title}</span>
+   647→                        <span className="shrink-0 text-caption text-muted-foreground">{doc.sizeLabel}</span>
+   648→                      </button>
+   649→                    </li>
+   650→                  ))}
+   651→                </ul>
+   652→              </SectionCard>
+   653→            )}
+   654→          </aside>
+   655→        </div>
+   656→      </div>
+   657→
+   658→      {/* Change request dialog */}
+   659→      <ChangeRequestDialog
+   660→        open={changeOpen}
+   661→        onOpenChange={setChangeOpen}
+   662→        orderId={orderId}
+   663→        items={order.items.map((i) => ({ productId: i.productId, name: i.name, sku: i.sku, qty: i.qty }))}
+   664→        initialKind={changeKind}
+   665→      />
+   666→
+   667→      {/* Reorder confirm */}
+   668→      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+   669→        <AlertDialogContent>
+   670→          <AlertDialogHeader>
+   671→            <AlertDialogTitle>Reorder {order.orderNumber}?</AlertDialogTitle>
+   672→            <AlertDialogDescription asChild>
+   673→              <div className="space-y-2">
+   674→                <p>
+   675→                  We&apos;ll load the items into your cart at your <strong>current</strong> effective
+   676→                  pricing. Quantities start at your last order.
+   677→                </p>
+   678→                <p>Any items currently in your cart will be replaced.</p>
+   679→              </div>
+   680→            </AlertDialogDescription>
+   681→          </AlertDialogHeader>
+   682→          {reorderError && (
+   683→            <div
+   684→              role="alert"
+   685→              className="rounded-[10px] bg-[var(--status-danger-bg)] px-3.5 py-2.5 text-body-sm text-[var(--status-danger-fg)]"
+   686→            >
+   687→              {reorderError}
+   688→            </div>
+   689→          )}
+   690→          <AlertDialogFooter>
+   691→            <AlertDialogCancel>Cancel</AlertDialogCancel>
+   692→            <AlertDialogAction
+   693→              onClick={() => {
+   694→                setConfirmOpen(false);
+   695→                reorderMutation.mutate();
+   696→              }}
+   697→            >
+   698→              {reorderMutation.isPending ? (
+   699→                <Loader2 className="size-4 animate-spin" aria-hidden />
+   700→              ) : (
+   701→                <RefreshCcw className="size-4" aria-hidden />
+   702→              )}
+   703→              Load items
+   704→            </AlertDialogAction>
+   705→          </AlertDialogFooter>
+   706→        </AlertDialogContent>
+   707→      </AlertDialog>
+   708→
+   709→      {/* Unavailable items notice */}
+   710→      <Dialog open={unavailableDraft !== null} onOpenChange={(o) => !o && setUnavailableDraft(null)}>
+   711→        <DialogContent className="sm:max-w-[520px]">
+   712→          <DialogHeader>
+   713→            <DialogTitle className="flex items-center gap-2">
+   714→              <TriangleAlert className="size-4.5 text-kraft-ink" aria-hidden />
+   715→              Some items unavailable
+   716→            </DialogTitle>
+   717→            <DialogDescription>
+   718→              These products from {unavailableDraft?.sourceOrderNumber} are inactive or not approved for
+   719→              your account. Available items load if you continue.
+   720→            </DialogDescription>
+   721→          </DialogHeader>
+   722→          <ul className="max-h-56 overflow-y-auto overscroll-contain rounded-[10px] border divide-y">
+   723→            {(unavailableDraft?.lines ?? [])
+   724→              .filter((l) => l.unavailable)
+   725→              .map((l) => (
+   726→                <li key={l.productId} className="flex items-center justify-between gap-3 px-3.5 py-2.5 text-body-sm">
+   727→                  <span className="min-w-0">
+   728→                    <span className="block truncate font-medium">{l.name}</span>
+   729→                    <Mono className="text-muted-foreground">{l.sku}</Mono>
+   730→                  </span>
+   731→                  <span className="tnum shrink-0 text-caption text-muted-foreground">
+   732→                    qty {l.qty.toLocaleString()}
+   733→                  </span>
+   734→                </li>
+   735→              ))}
+   736→          </ul>
+   737→          <DialogFooter className="gap-2">
+   738→            <Button variant="outline" onClick={() => setUnavailableDraft(null)}>
+   739→              Cancel
+   740→            </Button>
+   741→            <Button
+   742→              disabled={(unavailableDraft?.lines ?? []).every((l) => l.unavailable)}
+   743→              onClick={() => {
+   744→                if (unavailableDraft) finishReorder(unavailableDraft);
+   745→                setUnavailableDraft(null);
+   746→              }}
+   747→            >
+   748→              <Check className="size-4" aria-hidden />
+   749→              Continue
+   750→            </Button>
+   751→          </DialogFooter>
+   752→        </DialogContent>
+   753→      </Dialog>
+   754→    </motion.div>
+   755→  );
+   756→}
+   757→
+   758→// ─── Items identity (catalogue link vs custom request) ──────────────────────
+   759→
+   760→function ItemIdentity({
+   761→  item,
+   762→  navigate,
+   763→}: {
+   764→  item: { productId: string | null; name: string; sku: string };
+   765→  navigate: ReturnType<typeof useAppStore.getState>["navigate"];
+   766→}) {
+   767→  if (item.productId) {
+   768→    return (
+   769→      <button
+   770→        className="text-left text-body-sm font-semibold underline-offset-2 transition-colors hover:text-primary hover:underline"
+   771→        onClick={() => navigate("product-detail", { id: item.productId ?? "" })}
+   772→      >
+   773→        {item.name}
+   774→        <Mono className="ml-2 block text-muted-foreground">{item.sku}</Mono>
+   775→      </button>
+   776→    );
+   777→  }
+   778→  return (
+   779→    <span className="text-body-sm font-semibold">
+   780→      <span className="flex flex-wrap items-center gap-1.5">
+   781→        {item.name}
+   782→        <Chip>Custom request</Chip>
+   783→      </span>
+   784→      <Mono className="mt-0.5 block text-muted-foreground">{item.sku || "custom"}</Mono>
+   785→    </span>
+   786→  );
+   787→}
+   788→
+   789→// ─── Change requests card ────────────────────────────────────────────────────
+   790→
+   791→function ChangeRequestsCard({
+   792→  orderId,
+   793→  requests,
+   794→}: {
+   795→  orderId: string;
+   796→  requests: ChangeRequestDto[];
+   797→}) {
+   798→  const queryClient = useQueryClient();
+   799→
+   800→  const respondMutation = useMutation({
+   801→    mutationFn: (vars: { id: string; action: RespondAction }) =>
+   802→      api.post<ChangeRequestDto>(`/api/customer/change-requests/${vars.id}/respond`, {
+   803→        action: vars.action,
+   804→      }),
+   805→    onSuccess: (_cr, vars) => {
+   806→      queryClient.invalidateQueries({ queryKey: ["orders"] });
+   807→      queryClient.invalidateQueries({ queryKey: ["orders", "detail", orderId] });
+   808→      queryClient.invalidateQueries({ queryKey: ["customer-dashboard"] });
+   809→      queryClient.invalidateQueries({ queryKey: ["notifications"] });
+   810→      if (vars.action === "ACCEPT") {
+   811→        toast({ title: "Proposal accepted" });
+   812→      } else if (vars.action === "DECLINE") {
+   813→        toast({ title: "Proposal declined" });
+   814→      } else {
+   815→        toast({ title: "Request withdrawn" });
+   816→      }
+   817→    },
+   818→    onError: (err) =>
+   819→      toast({
+   820→        title: "Could not respond",
+   821→        description: errorMessage(err, "Please try again."),
+   822→        variant: "destructive",
+   823→      }),
+   824→  });
+   825→
+   826→  // Newest-first from the API — render chronologically for the narrative.
+   827→  const chronological = [...requests].reverse();
+   828→
+   829→  return (
+   830→    <SectionCard
+   831→      title="Change requests"
+   832→      className="print:break-inside-avoid"
+   833→    >
+   834→      <div className="space-y-3">
+   835→        {chronological.map((cr) => (
+   836→          <ChangeRequestEntry
+   837→            key={cr.id}
+   838→            cr={cr}
+   839→            busy={respondMutation.isPending}
+   840→            onRespond={(id, action) => respondMutation.mutate({ id, action })}
+   841→          />
+   842→        ))}
+   843→      </div>
+   844→    </SectionCard>
+   845→  );
+   846→}
+   847→
+   848→function ChangeRequestEntry({
+   849→  cr,
+   850→  busy,
+   851→  onRespond,
+   852→}: {
+   853→  cr: ChangeRequestDto;
+   854→  busy: boolean;
+   855→  onRespond: (id: string, action: RespondAction) => void;
+   856→}) {
+   857→  return (
+   858→    <article className="rounded-[14px] border bg-card p-5 shadow-xs">
+   859→      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-2">
+   860→        <ChangeStatusBadge status={cr.status} />
+   861→        <span className="text-body-sm text-foreground">requested by {cr.requestedByName}</span>
+   862→        <span className="ml-auto tnum text-caption text-muted-foreground">{formatDateTime(cr.createdAt)}</span>
+   863→      </div>
+   864→
+   865→      <ul className="mt-2.5 space-y-1">
+   866→        {cr.changes.map((c, i) => (
+   867→          <li key={i} className="text-body-sm leading-relaxed text-foreground/90">
+   868→            {changeItemText(c)}
+   869→          </li>
+   870→        ))}
+   871→      </ul>
+   872→
+   873→      {cr.requestNote && (
+   874→        <p className="mt-2 whitespace-pre-line text-caption leading-relaxed text-muted-foreground">
+   875→          <span className="font-medium text-muted-foreground/80">Your note: </span>
+   876→          {cr.requestNote}
+   877→        </p>
+   878→      )}
+   879→
+   880→      {cr.status === "PENDING" && (
+   881→        <div className="mt-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-[10px] border bg-surface-sunken/60 px-3.5 py-2.5">
+   882→          <p className="max-w-md text-caption leading-relaxed text-muted-foreground">
+   883→            Your order stays unchanged until Jeffery Group approves this request.
+   884→          </p>
+   885→          <Button
+   886→            variant="ghost"
+   887→            size="sm"
+   888→            className="h-7 px-2.5 text-caption text-muted-foreground hover:text-foreground"
+   889→            disabled={busy}
+   890→            onClick={() => onRespond(cr.id, "WITHDRAW")}
+   891→          >
+   892→            Withdraw request
+   893→          </Button>
+   894→        </div>
+   895→      )}
+   896→
+   897→      {(cr.status === "ACCEPTED" || cr.status === "DECLINED" || cr.status === "WITHDRAWN") &&
+   898→        (cr.adminName || cr.decidedAt) && (
+   899→          <div className="mt-3 rounded-[10px] border bg-surface-sunken/60 px-3.5 py-2.5 text-caption leading-relaxed">
+   900→            <p className="font-medium text-foreground">
+   901→              {cr.status === "ACCEPTED" ? "Approved" : cr.status === "DECLINED" ? "Declined" : "Withdrawn"}
+   902→              {cr.adminName ? ` by ${cr.adminName}` : ""}
+   903→              {cr.decidedAt ? ` · ${formatDateTime(cr.decidedAt)}` : ""}
+   904→            </p>
+   905→            {cr.decisionNote && <p className="mt-0.5 text-muted-foreground">{cr.decisionNote}</p>}
+   906→            {cr.appliedAt && cr.status === "ACCEPTED" && (
+   907→              <p className="mt-0.5 text-muted-foreground">Applied to your order {formatDateTime(cr.appliedAt)}.</p>
+   908→            )}
+   909→          </div>
+   910→        )}
+   911→
+   912→      {cr.status === "COUNTERED" && (
+   913→        <div className="mt-3 rounded-[10px] border border-kraft/40 bg-kraft-soft/60 p-3.5">
+   914→          <p className="text-micro text-kraft-ink">Jeffery Group proposed an alternative</p>
+   915→          {cr.counter && (
+   916→            <ul className="mt-1.5 space-y-1">
+   917→              {cr.counter.map((c, i) => (
+   918→                <li key={i} className="text-body-sm leading-relaxed text-foreground/90">
+   919→                  {changeItemText(c)}
+   920→                </li>
+   921→              ))}
+   922→            </ul>
+   923→          )}
+   924→          {cr.counterNote && (
+   925→            <p className="mt-1.5 whitespace-pre-line text-caption leading-relaxed text-kraft-ink/80">
+   926→              {cr.counterNote}
+   927→            </p>
+   928→          )}
+   929→          {cr.counterDecision ? (
+   930→            <p className="mt-2 text-caption leading-relaxed text-muted-foreground">
+   931→              You {cr.counterDecision === "ACCEPT" ? "accepted" : "declined"} this proposal
+   932→              {cr.counterDecidedAt ? ` on ${formatDateTime(cr.counterDecidedAt)}` : ""}.
+   933→            </p>
+   934→          ) : (
+   935→            <div className="mt-2.5 flex flex-wrap items-center gap-2">
+   936→              <Button
+   937→                size="sm"
+   938→                className="h-8 gap-1.5"
+   939→                disabled={busy}
+   940→                onClick={() => onRespond(cr.id, "ACCEPT")}
+   941→              >
+   942→                <Check className="size-3.5" aria-hidden /> Accept proposal
+   943→              </Button>
+   944→              <Button
+   945→                variant="outline"
+   946→                size="sm"
+   947→                className="h-8 gap-1.5"
+   948→                disabled={busy}
+   949→                onClick={() => onRespond(cr.id, "DECLINE")}
+   950→              >
+   951→                Decline
+   952→              </Button>
+   953→            </div>
+   954→          )}
+   955→        </div>
+   956→      )}
+   957→    </article>
+   958→  );
+   959→}
+   960→

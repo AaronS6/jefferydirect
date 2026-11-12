@@ -1,0 +1,252 @@
+/home/z/my-project/src/components/portal/settings-view.tsx:66:  user: { email: string; name: string; title: string | null; phone: string | null };
+/home/z/my-project/src/components/portal/settings-view.tsx:69:const NOTIFY_PREFS: { key: string; label: string; description: string }[] = [
+/home/z/my-project/src/components/portal/settings-view.tsx:72:    label: "Order updates",
+/home/z/my-project/src/components/portal/settings-view.tsx:77:    label: "Quote updates",
+/home/z/my-project/src/components/portal/settings-view.tsx:82:    label: "Documents",
+/home/z/my-project/src/components/portal/settings-view.tsx:87:    label: "Messages",
+/home/z/my-project/src/components/portal/settings-view.tsx:92:const EMPTY_ADDRESS = { label: "", line1: "", line2: "", city: "", province: "", postal: "" };
+/home/z/my-project/src/components/portal/settings-view.tsx:117:        <PageHeader title="Settings" />
+/home/z/my-project/src/components/portal/settings-view.tsx:126:        <PageHeader title="Settings" />
+/home/z/my-project/src/components/portal/settings-view.tsx:144:      <PageHeader title="Settings" />
+/home/z/my-project/src/components/portal/settings-view.tsx:194:      toast({ title: "Phone updated" });
+/home/z/my-project/src/components/portal/settings-view.tsx:201:      <SectionCard title="Account overview" contentClassName="p-0 sm:p-0">
+/home/z/my-project/src/components/portal/settings-view.tsx:203:          <DetailRow label="Business name">{account.organization?.name}</DetailRow>
+/home/z/my-project/src/components/portal/settings-view.tsx:204:          <DetailRow label="Customer code">
+/home/z/my-project/src/components/portal/settings-view.tsx:207:          <DetailRow label="Contact person">
+/home/z/my-project/src/components/portal/settings-view.tsx:211:          <DetailRow label="Email">
+/home/z/my-project/src/components/portal/settings-view.tsx:214:          <DetailRow label="Billing address">
+/home/z/my-project/src/components/portal/settings-view.tsx:224:          <DetailRow label="Company phone">{account.organization?.phone}</DetailRow>
+/home/z/my-project/src/components/portal/settings-view.tsx:235:      <SectionCard title="Contact phone">
+/home/z/my-project/src/components/portal/settings-view.tsx:245:                placeholder="(416) 555-0183"
+/home/z/my-project/src/components/portal/settings-view.tsx:300:        label: form.label.trim(),
+/home/z/my-project/src/components/portal/settings-view.tsx:312:      toast({ title: "Address added" });
+/home/z/my-project/src/components/portal/settings-view.tsx:322:      toast({ title: "Default delivery address updated" });
+/home/z/my-project/src/components/portal/settings-view.tsx:326:        title: "We could not update your default address",
+/home/z/my-project/src/components/portal/settings-view.tsx:337:      toast({ title: "Delivery address removed" });
+/home/z/my-project/src/components/portal/settings-view.tsx:341:        title: "We could not remove that address",
+/home/z/my-project/src/components/portal/settings-view.tsx:359:      title="Delivery addresses"
+/home/z/my-project/src/components/portal/settings-view.tsx:453:                placeholder="e.g. Second Store, Danforth"
+/home/z/my-project/src/components/portal/settings-view.tsx:455:                onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))}
+/home/z/my-project/src/components/portal/settings-view.tsx:463:                placeholder="1082 Danforth Avenue"
+/home/z/my-project/src/components/portal/settings-view.tsx:492:                  placeholder="ON"
+/home/z/my-project/src/components/portal/settings-view.tsx:502:                  placeholder="M4C 1V2"
+/home/z/my-project/src/components/portal/settings-view.tsx:586:      toast({ title: "We could not update that quantity", description: "Please try again." }),
+/home/z/my-project/src/components/portal/settings-view.tsx:593:      toast({ title: "Removed from your reorder list" });
+/home/z/my-project/src/components/portal/settings-view.tsx:596:      toast({ title: "We could not remove that item", description: "Please try again." }),
+/home/z/my-project/src/components/portal/settings-view.tsx:604:        title: "Quote required",
+/home/z/my-project/src/components/portal/settings-view.tsx:620:    toast({ title: "Added to cart" });
+/home/z/my-project/src/components/portal/settings-view.tsx:624:    <SectionCard title="Saved for reorder">
+/home/z/my-project/src/components/portal/settings-view.tsx:726:      toast({ title: "Notification preferences saved" });
+/home/z/my-project/src/components/portal/settings-view.tsx:733:      title="Notification preferences"
+/home/z/my-project/src/components/portal/settings-view.tsx:803:      toast({ title: "Password updated" });
+/home/z/my-project/src/components/portal/settings-view.tsx:828:      title="Password"
+/home/z/my-project/src/components/portal/notifications-view.tsx:67:      toast({ title: "Could not update notifications", description: "Please try again." }),
+/home/z/my-project/src/components/portal/notifications-view.tsx:74:  const groups: { label: string; items: NotificationDto[] }[] = [];
+/home/z/my-project/src/components/portal/notifications-view.tsx:92:        title="Notifications"
+/home/z/my-project/src/components/portal/notifications-view.tsx:116:        <EmptyState icon={Bell} title="You're all caught up" />
+/home/z/my-project/src/components/portal/catalog-view.tsx:34:  { value: "name", label: "Name A-Z" },
+/home/z/my-project/src/components/portal/catalog-view.tsx:35:  { value: "sku", label: "SKU" },
+/home/z/my-project/src/components/portal/catalog-view.tsx:36:  { value: "price_asc", label: "Price: low to high" },
+/home/z/my-project/src/components/portal/catalog-view.tsx:37:  { value: "price_desc", label: "Price: high to low" },
+/home/z/my-project/src/components/portal/catalog-view.tsx:38:  { value: "newest", label: "Newest" },
+/home/z/my-project/src/components/portal/catalog-view.tsx:43:// Kraft outline tag — products sold by quotation only.
+/home/z/my-project/src/components/portal/catalog-view.tsx:116:      <PageHeader title="Products" />
+/home/z/my-project/src/components/portal/catalog-view.tsx:119:      <div className="sticky top-[65px] z-20 -mx-4 mb-6 border-b bg-background/95 px-4 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/85 sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
+/home/z/my-project/src/components/portal/catalog-view.tsx:127:              placeholder="Search by name, SKU or description…"
+/home/z/my-project/src/components/portal/catalog-view.tsx:129:              aria-label="Search products"
+/home/z/my-project/src/components/portal/catalog-view.tsx:133:            <SelectTrigger className="h-9 w-[150px] shrink-0" aria-label="Sort products">
+/home/z/my-project/src/components/portal/catalog-view.tsx:146:            aria-label="Layout"
+/home/z/my-project/src/components/portal/catalog-view.tsx:153:              aria-label="Grid layout"
+/home/z/my-project/src/components/portal/catalog-view.tsx:163:              aria-label="List layout"
+/home/z/my-project/src/components/portal/catalog-view.tsx:251:              <Button variant="outline" onClick={() => navigate("quotations", { aux: "new" })}>
+/home/z/my-project/src/components/portal/catalog-view.tsx:280:                <span className="hidden shrink-0 lg:block" title="Minimum order quantity">
+/home/z/my-project/src/components/portal/catalog-view.tsx:340:          <Chip title="Minimum order quantity">MOQ {product.minOrderQty.toLocaleString()}</Chip>
+/home/z/my-project/src/components/portal/change-request-dialog.tsx:219:      toast({ title: "Change request submitted" });
+/home/z/my-project/src/components/portal/change-request-dialog.tsx:285:                    <SelectValue placeholder="Choose a product" />
+/home/z/my-project/src/components/portal/change-request-dialog.tsx:315:                  placeholder="e.g. Change material to B-flute and add 2-colour flexo printing inside…"
+/home/z/my-project/src/components/portal/change-request-dialog.tsx:329:                    placeholder="e.g. Carton 14×10×10, printed"
+/home/z/my-project/src/components/portal/change-request-dialog.tsx:343:                    placeholder="Anything about this line…"
+/home/z/my-project/src/components/portal/change-request-dialog.tsx:358:                  placeholder="e.g. 1082 Danforth Ave, Toronto, ON M4C 1V2"
+/home/z/my-project/src/components/portal/change-request-dialog.tsx:382:                  placeholder="e.g. Split the delivery across two locations"
+/home/z/my-project/src/components/portal/change-request-dialog.tsx:446:                placeholder="e.g. Needed before production starts Nov 14"
+/home/z/my-project/src/components/portal/order-builder-bits.tsx:20:type SpecFieldDef = { key: keyof LineSpecs; label: string; placeholder?: string };
+/home/z/my-project/src/components/portal/order-builder-bits.tsx:23:  { key: "dimensions", label: "Dimensions", placeholder: "e.g. 12 × 8 × 8 in" },
+/home/z/my-project/src/components/portal/order-builder-bits.tsx:24:  { key: "length", label: "Length" },
+/home/z/my-project/src/components/portal/order-builder-bits.tsx:25:  { key: "width", label: "Width" },
+/home/z/my-project/src/components/portal/order-builder-bits.tsx:26:  { key: "height", label: "Height" },
+/home/z/my-project/src/components/portal/order-builder-bits.tsx:27:  { key: "material", label: "Material", placeholder: "e.g. C-flute corrugate" },
+/home/z/my-project/src/components/portal/order-builder-bits.tsx:28:  { key: "thickness", label: "Thickness" },
+/home/z/my-project/src/components/portal/order-builder-bits.tsx:29:  { key: "printing", label: "Printing", placeholder: "e.g. 2-colour flexo" },
+/home/z/my-project/src/components/portal/order-builder-bits.tsx:30:  { key: "colour", label: "Colour" },
+/home/z/my-project/src/components/portal/order-builder-bits.tsx:31:  { key: "qtyPerCase", label: "Qty per case" },
+/home/z/my-project/src/components/portal/order-builder-bits.tsx:32:  { key: "custom", label: "Custom spec", placeholder: "e.g. coatings, pallet pattern" },
+/home/z/my-project/src/components/portal/order-builder-bits.tsx:49:): { key: string; label: string; value: string }[] {
+/home/z/my-project/src/components/portal/order-builder-bits.tsx:54:  }).map((f) => ({ key: f.key as string, label: f.label, value: (specs[f.key] ?? "").trim() }));
+/home/z/my-project/src/components/portal/order-builder-bits.tsx:234:      aria-label="Custom product request"
+/home/z/my-project/src/components/portal/order-builder-bits.tsx:245:            placeholder="e.g. Printed corrugated sleeve, 4-colour"
+/home/z/my-project/src/components/portal/order-builder-bits.tsx:267:          placeholder="What it's for, how it's used, any reference to existing products…"
+/home/z/my-project/src/components/portal/order-builder-bits.tsx:279:          placeholder="e.g. Partial deliveries acceptable"
+/home/z/my-project/src/components/portal/order-builder-bits.tsx:292:        label="Attach file references"
+/home/z/my-project/src/components/portal/order-builder-bits.tsx:326:      aria-label="Saved order drafts"
+/home/z/my-project/src/components/portal/orders-view.tsx:29:const FILTER_TABS: { value: Filter; label: string }[] = [
+/home/z/my-project/src/components/portal/orders-view.tsx:30:  { value: "all", label: "All orders" },
+/home/z/my-project/src/components/portal/orders-view.tsx:31:  { value: "active", label: "Active" },
+/home/z/my-project/src/components/portal/orders-view.tsx:32:  { value: "delivered", label: "Delivered" },
+/home/z/my-project/src/components/portal/orders-view.tsx:33:  { value: "cancelled", label: "Cancelled" },
+/home/z/my-project/src/components/portal/orders-view.tsx:84:      <PageHeader title="Orders" />
+/home/z/my-project/src/components/portal/orders-view.tsx:89:        aria-label="Filter orders"
+/home/z/my-project/src/components/portal/orders-view.tsx:198:                              title="A change request on this order is awaiting Jeffery Group's review"
+/home/z/my-project/src/components/portal/orders-view.tsx:234:                          title="A change request on this order is awaiting Jeffery Group's review"
+/home/z/my-project/src/components/portal/quote-detail-view.tsx:3:// Quotation detail — your original request, the issued quote (items, total,
+/home/z/my-project/src/components/portal/quote-detail-view.tsx:40:import type { QuotationDetail } from "@/types";
+/home/z/my-project/src/components/portal/quote-detail-view.tsx:61:export function QuoteDetailView({ quotationId }: { quotationId: string }) {
+/home/z/my-project/src/components/portal/quote-detail-view.tsx:82:    queryKey: ["quotations", "detail", quotationId],
+/home/z/my-project/src/components/portal/quote-detail-view.tsx:83:    queryFn: () => api.get<QuotationDetail>(`/api/customer/quotations/${quotationId}`),
+/home/z/my-project/src/components/portal/quote-detail-view.tsx:87:    queryClient.invalidateQueries({ queryKey: ["quotations"] });
+/home/z/my-project/src/components/portal/quote-detail-view.tsx:94:      api.post<{ ok: boolean }>(`/api/customer/quotations/${quotationId}/respond`, { action, comment }),
+/home/z/my-project/src/components/portal/quote-detail-view.tsx:104:        toast({ title: "Quote accepted" });
+/home/z/my-project/src/components/portal/quote-detail-view.tsx:106:        toast({ title: "Quote declined" });
+/home/z/my-project/src/components/portal/quote-detail-view.tsx:108:        toast({ title: "Revision requested" });
+/home/z/my-project/src/components/portal/quote-detail-view.tsx:118:      toast({ title: "Could not respond", description: message, variant: "destructive" });
+/home/z/my-project/src/components/portal/quote-detail-view.tsx:124:      api.post<{ orderId: string; orderNumber: string }>(`/api/customer/quotations/${quotationId}/convert`),
+/home/z/my-project/src/components/portal/quote-detail-view.tsx:129:      toast({ title: "Order created" });
+/home/z/my-project/src/components/portal/quote-detail-view.tsx:133:      const message = err instanceof Error ? err.message : "We could not convert this quotation.";
+/home/z/my-project/src/components/portal/quote-detail-view.tsx:136:      toast({ title: "Could not convert", description: message, variant: "destructive" });
+/home/z/my-project/src/components/portal/quote-detail-view.tsx:143:        <PageHeader title="Quote" onBack={back} />
+/home/z/my-project/src/components/portal/quote-detail-view.tsx:149:          <Button variant="outline" onClick={() => navigate("quotations")}>
+/home/z/my-project/src/components/portal/quote-detail-view.tsx:160:        <PageHeader title="Quote" onBack={back} />
+/home/z/my-project/src/components/portal/quote-detail-view.tsx:220:        {/* ── Issued quotation — paper document ── */}
+/home/z/my-project/src/components/portal/quote-detail-view.tsx:392:            <SectionCard title="Quote">
+/home/z/my-project/src/components/portal/quote-detail-view.tsx:408:            <SectionCard title="Next step">
+/home/z/my-project/src/components/portal/quote-detail-view.tsx:452:        <aside className="min-w-0" aria-label="Original quote request">
+/home/z/my-project/src/components/portal/quote-detail-view.tsx:453:          <SectionCard title="Your request">
+/home/z/my-project/src/components/portal/quote-detail-view.tsx:455:              <DetailRow label="Request title">{quote.title}</DetailRow>
+/home/z/my-project/src/components/portal/quote-detail-view.tsx:456:              <DetailRow label="Category">{quote.category}</DetailRow>
+/home/z/my-project/src/components/portal/quote-detail-view.tsx:457:              <DetailRow label="Product">{quote.productName}</DetailRow>
+/home/z/my-project/src/components/portal/quote-detail-view.tsx:458:              <DetailRow label="Dimensions">{quote.dimensions}</DetailRow>
+/home/z/my-project/src/components/portal/quote-detail-view.tsx:459:              <DetailRow label="Material">{quote.material}</DetailRow>
+/home/z/my-project/src/components/portal/quote-detail-view.tsx:460:              <DetailRow label="Colour">{quote.colour}</DetailRow>
+/home/z/my-project/src/components/portal/quote-detail-view.tsx:461:              <DetailRow label="Printing">{quote.printing}</DetailRow>
+/home/z/my-project/src/components/portal/quote-detail-view.tsx:462:              <DetailRow label="Quantity">{quote.quantity}</DetailRow>
+/home/z/my-project/src/components/portal/quote-detail-view.tsx:463:              <DetailRow label="Needed by">{quote.neededBy}</DetailRow>
+/home/z/my-project/src/components/portal/quote-detail-view.tsx:464:              <DetailRow label="Destination">{quote.destination}</DetailRow>
+/home/z/my-project/src/components/portal/quote-detail-view.tsx:465:              <DetailRow label="Specs">{quote.specs}</DetailRow>
+/home/z/my-project/src/components/portal/quote-detail-view.tsx:466:              <DetailRow label="Comments">{quote.comments}</DetailRow>
+/home/z/my-project/src/components/portal/quote-detail-view.tsx:470:              <DetailRow label="Requested">{formatDate(quote.createdAt)}</DetailRow>
+/home/z/my-project/src/components/portal/quote-detail-view.tsx:472:                <DetailRow label="Your response">
+/home/z/my-project/src/components/portal/quote-detail-view.tsx:522:                    placeholder="e.g. Timing no longer works for us"
+/home/z/my-project/src/components/portal/quote-detail-view.tsx:558:              placeholder="e.g. Can we look at 3,000 units instead, with freight to the Danforth location?"
+/home/z/my-project/src/components/portal/request-quote-dialog.tsx:3:// Request-new-quotation dialog — used by the quotations view (and opened with
+/home/z/my-project/src/components/portal/request-quote-dialog.tsx:36:  title: string;
+/home/z/my-project/src/components/portal/request-quote-dialog.tsx:51:  title: "",
+/home/z/my-project/src/components/portal/request-quote-dialog.tsx:119:      api.post<{ id: string; quoteNumber: string }>("/api/customer/quotations", {
+/home/z/my-project/src/components/portal/request-quote-dialog.tsx:120:        title: form.title.trim(),
+/home/z/my-project/src/components/portal/request-quote-dialog.tsx:134:      queryClient.invalidateQueries({ queryKey: ["quotations"] });
+/home/z/my-project/src/components/portal/request-quote-dialog.tsx:137:      toast({ title: "Quote requested" });
+/home/z/my-project/src/components/portal/request-quote-dialog.tsx:163:            placeholder="e.g. 5,000 custom printed 12-inch pizza boxes"
+/home/z/my-project/src/components/portal/request-quote-dialog.tsx:174:                <SelectValue placeholder="Select a category" />
+/home/z/my-project/src/components/portal/request-quote-dialog.tsx:191:              placeholder="Product or item name"
+/home/z/my-project/src/components/portal/request-quote-dialog.tsx:201:              placeholder="e.g. 12 × 12 × 1.75 in"
+/home/z/my-project/src/components/portal/request-quote-dialog.tsx:211:              placeholder="e.g. Single-wall corrugated kraft"
+/home/z/my-project/src/components/portal/request-quote-dialog.tsx:221:              placeholder="e.g. Natural kraft / white liner"
+/home/z/my-project/src/components/portal/request-quote-dialog.tsx:231:              placeholder="e.g. 2-colour flexo, artwork supplied"
+/home/z/my-project/src/components/portal/request-quote-dialog.tsx:248:              placeholder="e.g. 5,000 boxes"
+/home/z/my-project/src/components/portal/request-quote-dialog.tsx:258:              placeholder="e.g. 6 weeks / a specific date"
+/home/z/my-project/src/components/portal/request-quote-dialog.tsx:270:            placeholder="e.g. 1082 Danforth Ave, Toronto, ON"
+/home/z/my-project/src/components/portal/request-quote-dialog.tsx:281:            placeholder="e.g. board grade, venting, stacking strength"
+/home/z/my-project/src/components/portal/request-quote-dialog.tsx:292:            placeholder="e.g. artwork supplied as PDF"
+/home/z/my-project/src/components/portal/quotations-view.tsx:3:// Quotations — list with status/expiry awareness, plus the request-new-quotation
+/home/z/my-project/src/components/portal/quotations-view.tsx:19:import type { QuotationListItem } from "@/types";
+/home/z/my-project/src/components/portal/quotations-view.tsx:31:export function QuotationsView() {
+/home/z/my-project/src/components/portal/quotations-view.tsx:56:    queryKey: ["quotations"],
+/home/z/my-project/src/components/portal/quotations-view.tsx:57:    queryFn: () => api.get<QuotationListItem[]>("/api/customer/quotations"),
+/home/z/my-project/src/components/portal/quotations-view.tsx:62:  const open = (q: QuotationListItem) => navigate("quote-detail", { id: q.id });
+/home/z/my-project/src/components/portal/quotations-view.tsx:67:        title="Quotes"
+/home/z/my-project/src/components/portal/quotations-view.tsx:90:          title="No quotes yet"
+/home/z/my-project/src/components/portal/portal-bits.tsx:100:export function DetailRow({ label, children }: { label: string; children?: React.ReactNode }) {
+/home/z/my-project/src/components/portal/portal-bits.tsx:117:  label: string;
+/home/z/my-project/src/components/portal/announcements-strip.tsx:5:// (order updates, quotations, documents, broadcasts) can't be missed.
+/home/z/my-project/src/components/portal/announcements-strip.tsx:59:      toast({ title: "Could not update notifications", description: "Please try again." }),
+/home/z/my-project/src/components/portal/product-detail-view.tsx:4:// selector and add-to-order; quote-only products route to a quotation request.
+/home/z/my-project/src/components/portal/product-detail-view.tsx:62:      toast({ title: "Saved for reorder" });
+/home/z/my-project/src/components/portal/product-detail-view.tsx:66:        title: "Could not save",
+/home/z/my-project/src/components/portal/product-detail-view.tsx:75:        <PageHeader title="Product" onBack={back} />
+/home/z/my-project/src/components/portal/product-detail-view.tsx:92:        <PageHeader title="Product" onBack={back} />
+/home/z/my-project/src/components/portal/product-detail-view.tsx:130:    toast({ title: "Added to cart" });
+/home/z/my-project/src/components/portal/product-detail-view.tsx:151:          <SectionCard title="Details">
+/home/z/my-project/src/components/portal/product-detail-view.tsx:153:              <DetailRow label="Dimensions">{product.dimensions}</DetailRow>
+/home/z/my-project/src/components/portal/product-detail-view.tsx:154:              <DetailRow label="Material">{product.material}</DetailRow>
+/home/z/my-project/src/components/portal/product-detail-view.tsx:155:              <DetailRow label="Colour">{product.colour}</DetailRow>
+/home/z/my-project/src/components/portal/product-detail-view.tsx:156:              {product.leadTimeNote && <DetailRow label="Lead time">{product.leadTimeNote}</DetailRow>}
+/home/z/my-project/src/components/portal/product-detail-view.tsx:180:          <SectionCard title="Specification" contentClassName="px-4 py-1 sm:px-5">
+/home/z/my-project/src/components/portal/product-detail-view.tsx:182:              <DetailRow label="Dimensions">{product.dimensions}</DetailRow>
+/home/z/my-project/src/components/portal/product-detail-view.tsx:183:              <DetailRow label="Material">{product.material}</DetailRow>
+/home/z/my-project/src/components/portal/product-detail-view.tsx:184:              <DetailRow label="Colour">{product.colour}</DetailRow>
+/home/z/my-project/src/components/portal/product-detail-view.tsx:185:              <DetailRow label="Printing options">{product.printingOptions}</DetailRow>
+/home/z/my-project/src/components/portal/product-detail-view.tsx:186:              <DetailRow label="Case pack">{product.casePack.toLocaleString()} per case</DetailRow>
+/home/z/my-project/src/components/portal/product-detail-view.tsx:187:              <DetailRow label="Cases per pallet">
+/home/z/my-project/src/components/portal/product-detail-view.tsx:190:              <DetailRow label="Unit">{product.unit}</DetailRow>
+/home/z/my-project/src/components/portal/product-detail-view.tsx:191:              <DetailRow label="Minimum order">{product.minOrderQty.toLocaleString()}</DetailRow>
+/home/z/my-project/src/components/portal/product-detail-view.tsx:192:              <DetailRow label="Order increment">{product.increment.toLocaleString()}</DetailRow>
+/home/z/my-project/src/components/portal/product-detail-view.tsx:193:              <DetailRow label="Availability">
+/home/z/my-project/src/components/portal/product-detail-view.tsx:211:                    onClick={() => navigate("quotations", { aux: product.name })}
+/home/z/my-project/src/components/portal/product-detail-view.tsx:220:            <SectionCard title="Pricing">
+/home/z/my-project/src/components/portal/dashboard-view.tsx:142:          <Button variant="outline" size="lg" onClick={() => navigate("quotations", { aux: "new" })}>
+/home/z/my-project/src/components/portal/dashboard-view.tsx:159:                  label="Active orders"
+/home/z/my-project/src/components/portal/dashboard-view.tsx:167:                  label="Open quotes"
+/home/z/my-project/src/components/portal/dashboard-view.tsx:169:                  onClick={() => navigate("quotations")}
+/home/z/my-project/src/components/portal/dashboard-view.tsx:175:                  label="Invoices"
+/home/z/my-project/src/components/portal/dashboard-view.tsx:183:                  label="Messages"
+/home/z/my-project/src/components/portal/dashboard-view.tsx:185:                  onClick={() => navigate("support")}
+/home/z/my-project/src/components/portal/dashboard-view.tsx:224:            title="Recent orders"
+/home/z/my-project/src/components/portal/dashboard-view.tsx:240:                title="No orders yet"
+/home/z/my-project/src/components/portal/dashboard-view.tsx:283:                                  title="Next update expected by this date"
+/home/z/my-project/src/components/portal/dashboard-view.tsx:318:                              title="Next update expected by this date"
+/home/z/my-project/src/components/portal/dashboard-view.tsx:340:            <SectionCard title="Order again">
+/home/z/my-project/src/components/portal/dashboard-view.tsx:358:        <aside className="min-w-0" aria-label="Recent account activity">
+/home/z/my-project/src/components/portal/dashboard-view.tsx:360:            title="Recent activity"
+/home/z/my-project/src/components/portal/documents-view.tsx:64:  { value: "newest", label: "Newest" },
+/home/z/my-project/src/components/portal/documents-view.tsx:65:  { value: "oldest", label: "Oldest" },
+/home/z/my-project/src/components/portal/documents-view.tsx:66:  { value: "title", label: "Title A-Z" },
+/home/z/my-project/src/components/portal/documents-view.tsx:116:    else if (doc.quotationId) navigate("quote-detail", { id: doc.quotationId });
+/home/z/my-project/src/components/portal/documents-view.tsx:121:      <PageHeader title="Documents" />
+/home/z/my-project/src/components/portal/documents-view.tsx:132:              placeholder="Search documents…"
+/home/z/my-project/src/components/portal/documents-view.tsx:134:              aria-label="Search documents"
+/home/z/my-project/src/components/portal/documents-view.tsx:138:            <SelectTrigger className="h-9 w-[150px] shrink-0" aria-label="Sort documents">
+/home/z/my-project/src/components/portal/documents-view.tsx:152:          {[{ value: ALL, label: "All categories" }, ...DOCUMENT_CATEGORIES.map((c) => ({ value: c, label: DOCUMENT_CATEGORY_LABELS[c] }))].map(
+/home/z/my-project/src/components/portal/support-view.tsx:58:      <PageHeader title="Messages" />
+/home/z/my-project/src/components/portal/support-view.tsx:71:            <EmptyState icon={LifeBuoy} title="No messages yet" />
+/home/z/my-project/src/components/portal/support-view.tsx:74:              title="Message history"
+/home/z/my-project/src/components/portal/support-view.tsx:87:        <aside className="order-last lg:order-none lg:sticky lg:bottom-6 lg:self-end" aria-label="Send a new message">
+/home/z/my-project/src/components/portal/support-view.tsx:129:      toast({ title: "Message sent" });
+/home/z/my-project/src/components/portal/support-view.tsx:146:    <SectionCard title="New message">
+/home/z/my-project/src/components/portal/support-view.tsx:153:            placeholder="e.g. Delivery timing for ORD-2024-0118"
+/home/z/my-project/src/components/portal/support-view.tsx:163:              <SelectValue placeholder="What is this about?" />
+/home/z/my-project/src/components/portal/support-view.tsx:178:              <SelectValue placeholder="No specific order" />
+/home/z/my-project/src/components/portal/support-view.tsx:196:            placeholder="e.g. Delivery timing for ORD-2024-0118 to the Danforth store"
+/home/z/my-project/src/components/portal/cart-view.tsx:90:const EMPTY_ADDRESS_FORM = { label: "", line1: "", line2: "", city: "", province: "", postal: "" };
+/home/z/my-project/src/components/portal/cart-view.tsx:93:  { n: 1, label: "Items" },
+/home/z/my-project/src/components/portal/cart-view.tsx:94:  { n: 2, label: "Delivery" },
+/home/z/my-project/src/components/portal/cart-view.tsx:95:  { n: 3, label: "Reference" },
+/home/z/my-project/src/components/portal/cart-view.tsx:96:  { n: 4, label: "Review" },
+/home/z/my-project/src/components/portal/cart-view.tsx:327:    toast({ title: "Draft loaded" });
+/home/z/my-project/src/components/portal/cart-view.tsx:333:        label: addressForm.label.trim(),
+/home/z/my-project/src/components/portal/cart-view.tsx:347:      toast({ title: "Address added" });
+/home/z/my-project/src/components/portal/cart-view.tsx:369:      toast({ title: "Draft saved" });
+/home/z/my-project/src/components/portal/cart-view.tsx:382:      toast({ title: "Draft deleted" });
+/home/z/my-project/src/components/portal/cart-view.tsx:385:      toast({ title: "Could not delete draft", description: "Please try again." }),
+/home/z/my-project/src/components/portal/cart-view.tsx:445:      toast({ title: "Order submitted" });
+/home/z/my-project/src/components/portal/cart-view.tsx:456:      toast({ title: "Add an item first" });
+/home/z/my-project/src/components/portal/cart-view.tsx:460:      toast({ title: "Check quantities" });
+/home/z/my-project/src/components/portal/cart-view.tsx:520:        <PageHeader title="Order builder" />
+/home/z/my-project/src/components/portal/cart-view.tsx:523:          title="Your cart is empty"
+/home/z/my-project/src/components/portal/cart-view.tsx:551:      <PageHeader title="Order builder" />
+/home/z/my-project/src/components/portal/cart-view.tsx:566:      <ol className="mb-6 flex flex-wrap items-center gap-x-1 gap-y-2" aria-label="Order request steps">
+/home/z/my-project/src/components/portal/cart-view.tsx:845:                    toast({ title: "Custom request added" });
+/home/z/my-project/src/components/portal/cart-view.tsx:894:                          <SelectValue placeholder="Choose an address" />
+/home/z/my-project/src/components/portal/cart-view.tsx:955:                    placeholder="e.g. Dock hours 8am to 4pm, receiving contact is Dana"
+/home/z/my-project/src/components/portal/cart-view.tsx:986:                  placeholder="e.g. MLP-PO-0918"
+/home/z/my-project/src/components/portal/cart-view.tsx:998:                  placeholder="e.g. Stack no more than 5 high, ship after Nov 14"
+/home/z/my-project/src/components/portal/cart-view.tsx:1080:            <SectionCard title="Request summary" className="lg:sticky lg:top-24 lg:self-start">
+
+[Showing results with pagination = limit: 250]

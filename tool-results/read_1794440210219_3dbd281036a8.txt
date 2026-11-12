@@ -1,0 +1,707 @@
+     1→"use client";
+     2→
+     3→// Administration — quotation detail & builder. Zone A shows the customer's
+     4→// original request; zone B builds item lines and issues (or re-issues) the
+     5→// quotation. internalNote is stored on the quotation and submitted with issue.
+     6→
+     7→import { useEffect, useRef, useState } from "react";
+     8→import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+     9→import {
+    10→  CalendarDays,
+    11→  CheckCircle2,
+    12→  ClipboardList,
+    13→  Eye,
+    14→  FileText,
+    15→  Loader2,
+    16→  Plus,
+    17→  Printer,
+    18→  RefreshCcw,
+    19→  Send,
+    20→  Trash2,
+    21→  XCircle,
+    22→} from "lucide-react";
+    23→import { Button } from "@/components/ui/button";
+    24→import { Input } from "@/components/ui/input";
+    25→import { Label } from "@/components/ui/label";
+    26→import { Textarea } from "@/components/ui/textarea";
+    27→import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+    28→import {
+    29→  Select,
+    30→  SelectContent,
+    31→  SelectItem,
+    32→  SelectTrigger,
+    33→  SelectValue,
+    34→} from "@/components/ui/select";
+    35→import { Table, TableBody, TableFooter, TableHeader, TableRow } from "@/components/ui/table";
+    36→import { PageHeader } from "@/components/shared/page-header";
+    37→import { StatusBadge } from "@/components/shared/status-badge";
+    38→import { Money, MoneyWithCode } from "@/components/shared/money";
+    39→import { QuoteDocument } from "@/components/shared/quote-document";
+    40→import { api } from "@/lib/api-client";
+    41→import { formatDate, formatDateTime } from "@/lib/date";
+    42→import { QUOTE_ITEM_KINDS, QUOTE_ITEM_KIND_LABELS, ORDER_SOURCE_SHORT_LABELS } from "@/lib/constants";
+    43→import { centsToInputValue, parseDollarsToCents } from "@/lib/money";
+    44→import { useAppStore } from "@/store/app-store";
+    45→import { toast } from "@/hooks/use-toast";
+    46→import type { QuotationDetail } from "@/types";
+    47→import { DefRow, GroupLabel, InlineError, RowsSkeleton, SectionCard, Td, Th, ViewEnter, dashed } from "./admin-ui";
+    48→import { cn } from "@/lib/utils";
+    49→
+    50→// ─── Builder draft state ─────────────────────────────────────────────────────
+    51→
+    52→type DraftRow = { uid: string; description: string; kind: string; qty: string; price: string };
+    53→
+    54→let uidCounter = 0;
+    55→const newUid = () => `row-${++uidCounter}`;
+    56→
+    57→function rowsFromQuote(quote: QuotationDetail): DraftRow[] {
+    58→  if (quote.items.length === 0) return [emptyRow()];
+    59→  return quote.items.map((i) => ({
+    60→    uid: newUid(),
+    61→    description: i.description,
+    62→    kind: i.kind,
+    63→    qty: String(i.qty),
+    64→    price: centsToInputValue(i.unitPriceCents),
+    65→  }));
+    66→}
+    67→
+    68→function emptyRow(): DraftRow {
+    69→  return { uid: newUid(), description: "", kind: "PRODUCT", qty: "", price: "" };
+    70→}
+    71→
+    72→function rowCents(row: DraftRow): number | null {
+    73→  const cents = parseDollarsToCents(row.price.trim());
+    74→  const qty = Number.parseInt(row.qty, 10);
+    75→  if (cents === null || !Number.isFinite(qty) || qty <= 0) return null;
+    76→  return cents * qty;
+    77→}
+    78→
+    79→function rowIssues(row: DraftRow): { description: boolean; qty: boolean; price: boolean } {
+    80→  const cents = parseDollarsToCents(row.price.trim());
+    81→  const qty = Number.parseInt(row.qty, 10);
+    82→  return {
+    83→    description: row.description.trim() === "",
+    84→    qty: !Number.isFinite(qty) || qty <= 0,
+    85→    price: cents === null,
+    86→  };
+    87→}
+    88→
+    89→// ─── View ─────────────────────────────────────────────────────────────────────
+    90→
+    91→export function AdminQuoteDetailView({ quotationId }: { quotationId: string }) {
+    92→  const back = useAppStore((s) => s.back);
+    93→  const navigate = useAppStore((s) => s.navigate);
+    94→  const queryClient = useQueryClient();
+    95→
+    96→  const { data: quote, isLoading, isError, error } = useQuery({
+    97→    queryKey: ["admin", "quote", quotationId],
+    98→    queryFn: () => api.get<QuotationDetail>(`/api/admin/quotations/${quotationId}`),
+    99→  });
+   100→
+   101→  // Builder state
+   102→  const [builderOpen, setBuilderOpen] = useState(false);
+   103→  const [rows, setRows] = useState<DraftRow[]>([emptyRow()]);
+   104→  const [expiry, setExpiry] = useState("");
+   105→  const [terms, setTerms] = useState("");
+   106→  const [internalNote, setInternalNote] = useState("");
+   107→  const [previewOpen, setPreviewOpen] = useState(false);
+   108→  const initialised = useRef(false);
+   109→
+   110→  // Open the builder by default while the request awaits pricing; prefill from
+   111→  // the quotation once data arrives.
+   112→  useEffect(() => {
+   113→    if (!quote) return;
+   114→    if (!initialised.current) {
+   115→      initialised.current = true;
+   116→      setRows(rowsFromQuote(quote));
+   117→      setTerms(quote.terms ?? "");
+   118→      setInternalNote(quote.internalNote ?? "");
+   119→      setExpiry(quote.expiryDate ? quote.expiryDate.slice(0, 10) : "");
+   120→      if (quote.status === "REQUESTED" || quote.status === "UNDER_REVIEW") setBuilderOpen(true);
+   121→    }
+   122→  }, [quote]);
+   123→
+   124→  function invalidate() {
+   125→    queryClient.invalidateQueries({ queryKey: ["admin", "quote", quotationId] });
+   126→    queryClient.invalidateQueries({ queryKey: ["admin", "quotes"] });
+   127→    queryClient.invalidateQueries({ queryKey: ["admin", "overview"] });
+   128→    queryClient.invalidateQueries({ queryKey: ["notifications"] });
+   129→  }
+   130→
+   131→  const acknowledge = useMutation({
+   132→    mutationFn: () => api.post<{ ok: boolean }>(`/api/admin/quotations/${quotationId}/acknowledge`, { status: "UNDER_REVIEW" }),
+   133→    onSuccess: () => {
+   134→      invalidate();
+   135→      toast({
+   136→        title: "Request acknowledged",
+   137→        description: "The customer has been notified their request is under review.",
+   138→      });
+   139→    },
+   140→    onError: (err: Error) => toast({ title: "Could not acknowledge.", description: err.message }),
+   141→  });
+   142→
+   143→  const issue = useMutation({
+   144→    mutationFn: () => {
+   145→      const items = rows.map((r) => ({
+   146→        description: r.description.trim(),
+   147→        kind: r.kind,
+   148→        qty: Number.parseInt(r.qty, 10),
+   149→        unitPriceCents: parseDollarsToCents(r.price.trim()) ?? 0,
+   150→      }));
+   151→      return api.post<{ ok: boolean }>(`/api/admin/quotations/${quotationId}/issue`, {
+   152→        items,
+   153→        expiryDate: expiry || null,
+   154→        terms: terms.trim() || null,
+   155→        internalNote: internalNote.trim() || null,
+   156→      });
+   157→    },
+   158→    onSuccess: () => {
+   159→      invalidate();
+   160→      setBuilderOpen(false);
+   161→      initialised.current = false; // re-prefill from refreshed data if reopened
+   162→      toast({
+   163→        title: "Quotation issued — customer notified",
+   164→        description: "The customer can now review pricing and respond from their portal.",
+   165→      });
+   166→    },
+   167→    onError: (err: Error) => toast({ title: "Could not issue quotation.", description: err.message }),
+   168→  });
+   169→
+   170→  if (isError) {
+   171→    return (
+   172→      <div>
+   173→        <PageHeader title="Quotation" onBack={back} eyebrow="Quotation detail" />
+   174→        <InlineError message={error instanceof Error ? error.message : "Could not load this quotation."} />
+   175→      </div>
+   176→    );
+   177→  }
+   178→
+   179→  if (isLoading || !quote) {
+   180→    return (
+   181→      <div>
+   182→        <PageHeader title="Quotation" onBack={back} eyebrow="Quotation detail" description="Loading quotation…" />
+   183→        <div className="grid gap-4 sm:gap-6 lg:grid-cols-[1fr_360px]">
+   184→          <SectionCard>
+   185→            <RowsSkeleton rows={5} />
+   186→          </SectionCard>
+   187→          <SectionCard>
+   188→            <RowsSkeleton rows={4} />
+   189→          </SectionCard>
+   190→        </div>
+   191→      </div>
+   192→    );
+   193→  }
+   194→
+   195→  const preIssue = quote.status === "REQUESTED" || quote.status === "UNDER_REVIEW";
+   196→  const reissuable = quote.status === "ISSUED" || quote.status === "REVISED" || quote.status === "EXPIRED";
+   197→  const responded = quote.status === "ACCEPTED" || quote.status === "REJECTED";
+   198→  const hasItems = quote.items.length > 0;
+   199→
+   200→  function openBuilderPrefilled(q: QuotationDetail) {
+   201→    setRows(rowsFromQuote(q));
+   202→    setTerms(q.terms ?? "");
+   203→    setInternalNote(q.internalNote ?? "");
+   204→    setExpiry(q.expiryDate ? q.expiryDate.slice(0, 10) : "");
+   205→    setBuilderOpen(true);
+   206→  }
+   207→
+   208→  const rowsValid = rows.length > 0 && rows.every((r) => {
+   209→    const i = rowIssues(r);
+   210→    return !i.description && !i.qty && !i.price;
+   211→  });
+   212→  const invalidRows = rows.length - rows.filter((r) => {
+   213→    const i = rowIssues(r);
+   214→    return !i.description && !i.qty && !i.price;
+   215→  }).length;
+   216→  const subtotalCents = rows.reduce((sum, r) => sum + (rowCents(r) ?? 0), 0);
+   217→
+   218→  return (
+   219→    <div>
+   220→      <PageHeader
+   221→        eyebrow={<span className="font-mono">{quote.quoteNumber}</span>}
+   222→        title={quote.title}
+   223→        onBack={back}
+   224→        description={
+   225→          <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+   226→            <button
+   227→              type="button"
+   228→              className="underline-offset-4 transition-colors hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded"
+   229→              onClick={() => navigate("admin-customer-detail", { id: quote.orgId })}
+   230→            >
+   231→              {quote.orgName}
+   232→            </button>
+   233→            <span className="text-muted-foreground/50">·</span>
+   234→            <span>Requested by {quote.requestedBy}</span>
+   235→            {quote.sourceType && quote.sourceType !== "PORTAL" && (
+   236→              <>
+   237→                <span className="text-muted-foreground/50">·</span>
+   238→                <span className="text-kraft-ink">
+   239→                  Issued on behalf ({(ORDER_SOURCE_SHORT_LABELS[quote.sourceType] ?? quote.sourceType).toLowerCase()})
+   240→                  {quote.recordedByName ? ` — ${quote.recordedByName}` : ""}
+   241→                </span>
+   242→              </>
+   243→            )}
+   244→            <span className="text-muted-foreground/50">·</span>
+   245→            <span>{formatDate(quote.createdAt)}</span>
+   246→          </span>
+   247→        }
+   248→        actions={
+   249→          <div className="flex flex-wrap items-center gap-2">
+   250→            {quote.revision > 0 && (
+   251→              <span className="rounded-full border bg-secondary px-2 py-0.5 text-caption font-medium text-muted-foreground">
+   252→                Revision {quote.revision}
+   253→              </span>
+   254→            )}
+   255→            {preIssue && (
+   256→              <Button
+   257→                size="sm"
+   258→                variant="outline"
+   259→                className="gap-1.5"
+   260→                disabled={quote.status !== "REQUESTED" || acknowledge.isPending}
+   261→                onClick={() => acknowledge.mutate()}
+   262→              >
+   263→                {acknowledge.isPending ? <Loader2 className="size-3.5 animate-spin" aria-hidden /> : <CheckCircle2 className="size-3.5" aria-hidden />}
+   264→                Acknowledge
+   265→              </Button>
+   266→            )}
+   267→            <StatusBadge status={quote.status} kind="quote" />
+   268→          </div>
+   269→        }
+   270→      />
+   271→
+   272→      <ViewEnter>
+   273→      <div className="grid items-start gap-4 sm:gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
+   274→        {/* Zone A + issued quote + builder */}
+   275→        <div className="min-w-0 space-y-4 sm:space-y-6">
+   276→          <SectionCard
+   277→            title="Customer's request"
+   278→            description="What the customer asked for, in their own words"
+   279→          >
+   280→            <dl>
+   281→              <DefRow label="Category" value={dashed(quote.category)} />
+   282→              <DefRow label="Product" value={dashed(quote.productName)} />
+   283→              <DefRow label="Dimensions" value={dashed(quote.dimensions)} />
+   284→              <DefRow label="Material" value={dashed(quote.material)} />
+   285→              <DefRow label="Colour" value={dashed(quote.colour)} />
+   286→              <DefRow label="Printing" value={dashed(quote.printing)} />
+   287→              <DefRow label="Quantity" value={dashed(quote.quantity)} />
+   288→              <DefRow label="Needed by" value={dashed(quote.neededBy)} />
+   289→              <DefRow label="Destination" value={dashed(quote.destination)} />
+   290→              <DefRow label="Specifications" value={dashed(quote.specs)} />
+   291→              <DefRow label="Comments" value={dashed(quote.comments)} />
+   292→            </dl>
+   293→          </SectionCard>
+   294→
+   295→          {/* Response zone */}
+   296→          {responded && (
+   297→            <div
+   298→              className={cn(
+   299→                "flex items-start gap-3 rounded-[14px] border border-transparent p-4 sm:p-5",
+   300→                quote.status === "ACCEPTED"
+   301→                  ? "bg-[var(--status-done-bg)]"
+   302→                  : "bg-[var(--status-danger-bg)]",
+   303→              )}
+   304→            >
+   305→              {quote.status === "ACCEPTED" ? (
+   306→                <CheckCircle2 className="mt-0.5 size-5 shrink-0 text-[var(--status-done-fg)]" aria-hidden />
+   307→              ) : (
+   308→                <XCircle className="mt-0.5 size-5 shrink-0 text-[var(--status-danger-fg)]" aria-hidden />
+   309→              )}
+   310→              <div className="min-w-0">
+   311→                <p
+   312→                  className={cn(
+   313→                    "text-body font-medium",
+   314→                    quote.status === "ACCEPTED" ? "text-[var(--status-done-fg)]" : "text-[var(--status-danger-fg)]",
+   315→                  )}
+   316→                >
+   317→                  Customer {quote.status === "ACCEPTED" ? "accepted" : "declined"} this quotation
+   318→                  {quote.respondedAt ? ` · ${formatDateTime(quote.respondedAt)}` : ""}
+   319→                </p>
+   320→                {quote.respondedNote && (
+   321→                  <p className="mt-1 text-body-sm leading-relaxed text-foreground/80">{quote.respondedNote}</p>
+   322→                )}
+   323→              </div>
+   324→            </div>
+   325→          )}
+   326→
+   327→          {quote.status === "EXPIRED" && hasItems && (
+   328→            <div className="flex items-start gap-3 rounded-[14px] border bg-secondary/50 p-4 text-body-sm leading-relaxed text-muted-foreground">
+   329→              <CalendarDays className="mt-0.5 size-4 shrink-0" aria-hidden />
+   330→              <p>
+   331→                This quotation expired{quote.expiryDate ? ` on ${formatDate(quote.expiryDate)}` : ""} without a customer
+   332→                response. Re-issue to send fresh pricing.
+   333→              </p>
+   334→            </div>
+   335→          )}
+   336→
+   337→          {/* Issued quotation view */}
+   338→          {hasItems && (reissuable || responded || quote.status === "EXPIRED") && (
+   339→            <SectionCard
+   340→              title={quote.status === "REVISED" ? `Issued quotation — revision ${quote.revision}` : "Issued quotation"}
+   341→              description={
+   342→                quote.expiryDate ? `Issued ${formatDate(quote.issuedAt)} · valid until ${formatDate(quote.expiryDate)}` : `Issued ${formatDate(quote.issuedAt)}`
+   343→              }
+   344→              action={
+   345→                <div className="flex flex-wrap gap-2">
+   346→                  <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setPreviewOpen(true)}>
+   347→                    <Eye className="size-3.5" aria-hidden /> Preview document
+   348→                  </Button>
+   349→                  {reissuable && (
+   350→                    <Button
+   351→                      variant={preIssue ? "default" : "outline"}
+   352→                      size="sm"
+   353→                      className="gap-1.5"
+   354→                      onClick={() => {
+   355→                        setBuilderOpen(false);
+   356→                        openBuilderPrefilled(quote);
+   357→                      }}
+   358→                    >
+   359→                      <RefreshCcw className="size-3.5" aria-hidden /> Re-issue (revision)
+   360→                    </Button>
+   361→                  )}
+   362→                </div>
+   363→              }
+   364→            >
+   365→              <Table>
+   366→                <TableHeader>
+   367→                  <TableRow>
+   368→                    <Th>Description</Th>
+   369→                    <Th>Type</Th>
+   370→                    <Th className="text-right">Qty</Th>
+   371→                    <Th className="text-right">Unit</Th>
+   372→                    <Th className="text-right">Amount</Th>
+   373→                  </TableRow>
+   374→                </TableHeader>
+   375→                <TableBody>
+   376→                  {quote.items.map((item) => (
+   377→                    <TableRow key={item.id}>
+   378→                      <Td className="max-w-[320px] whitespace-normal">{item.description}</Td>
+   379→                      <Td>
+   380→                        <span className="inline-flex items-center rounded-full border bg-card px-2 py-0.5 text-caption text-muted-foreground">
+   381→                          {QUOTE_ITEM_KIND_LABELS[item.kind] ?? item.kind}
+   382→                        </span>
+   383→                      </Td>
+   384→                      <Td className="tnum text-right">{item.qty.toLocaleString()}</Td>
+   385→                      <Td className="text-right">
+   386→                        <Money cents={item.unitPriceCents} />
+   387→                      </Td>
+   388→                      <Td className="text-right font-medium">
+   389→                        <Money cents={item.lineTotalCents} />
+   390→                      </Td>
+   391→                    </TableRow>
+   392→                  ))}
+   393→                </TableBody>
+   394→                <TableFooter>
+   395→                  <TableRow>
+   396→                    <Td className="text-right font-medium">Quoted total</Td>
+   397→                    <Td />
+   398→                    <Td />
+   399→                    <Td />
+   400→                    <Td className="text-right font-semibold">
+   401→                      <MoneyWithCode cents={quote.itemsTotalCents} />
+   402→                    </Td>
+   403→                  </TableRow>
+   404→                </TableFooter>
+   405→              </Table>
+   406→
+   407→              {quote.terms && (
+   408→                <div className="mt-4 border-t pt-4">
+   409→                  <GroupLabel className="mb-1.5">Terms &amp; conditions</GroupLabel>
+   410→                  <p className="text-body-sm leading-relaxed text-muted-foreground">{quote.terms}</p>
+   411→                </div>
+   412→              )}
+   413→              {quote.internalNote && (
+   414→                <div className="mt-3 rounded-md border border-l-2 border-l-kraft bg-surface-sunken px-3.5 py-3">
+   415→                  <GroupLabel className="mb-1.5">Internal note — not shown to the customer</GroupLabel>
+   416→                  <p className="text-body-sm leading-relaxed text-muted-foreground">{quote.internalNote}</p>
+   417→                </div>
+   418→              )}
+   419→            </SectionCard>
+   420→          )}
+   421→
+   422→          {/* Zone B — the builder */}
+   423→          {builderOpen ? (
+   424→            <SectionCard
+   425→              title={hasItems ? "Re-issue — build the revised quotation" : "Build & issue the quotation"}
+   426→              description="Itemised pricing, terms and internal note are sent together to the customer"
+   427→              action={
+   428→                <Button
+   429→                  variant="ghost"
+   430→                  size="sm"
+   431→                  className="gap-1.5 text-muted-foreground"
+   432→                  onClick={() => setBuilderOpen(false)}
+   433→                  disabled={preIssue}
+   434→                  title={preIssue ? "Pricing this request requires the builder" : "Close without issuing"}
+   435→                >
+   436→                  Close builder
+   437→                </Button>
+   438→              }
+   439→            >
+   440→              <div className="space-y-4">
+   441→                {/* Item lines */}
+   442→                <div>
+   443→                  <GroupLabel className="mb-2">Quotation lines</GroupLabel>
+   444→                  <div className="space-y-2.5">
+   445→                    {rows.map((row, index) => {
+   446→                      const issues = rowIssues(row);
+   447→                      const total = rowCents(row);
+   448→                      return (
+   449→                        <div key={row.uid} className="rounded-md border bg-card p-3">
+   450→                          <div className="grid gap-2.5 sm:grid-cols-[1fr_150px_90px_110px_auto] sm:items-end">
+   451→                            <div className="min-w-0">
+   452→                              <Label htmlFor={`desc-${row.uid}`} className="text-caption text-muted-foreground">
+   453→                                Description {index + 1}
+   454→                              </Label>
+   455→                              <Input
+   456→                                id={`desc-${row.uid}`}
+   457→                                value={row.description}
+   458→                                onChange={(e) => updateRow(row.uid, { description: e.target.value })}
+   459→                                placeholder="e.g. Custom printed 12&rdquo; pizza box — 2-colour flexo"
+   460→                                aria-invalid={issues.description || undefined}
+   461→                                className="mt-1 h-9 text-body-sm"
+   462→                              />
+   463→                            </div>
+   464→                            <div>
+   465→                              <Label htmlFor={`kind-${row.uid}`} className="text-caption text-muted-foreground">
+   466→                                Type
+   467→                              </Label>
+   468→                              <Select value={row.kind} onValueChange={(v) => updateRow(row.uid, { kind: v })}>
+   469→                                <SelectTrigger id={`kind-${row.uid}`} className="mt-1 h-9 text-body-sm" aria-label="Line type">
+   470→                                  <SelectValue />
+   471→                                </SelectTrigger>
+   472→                                <SelectContent>
+   473→                                  {QUOTE_ITEM_KINDS.map((k) => (
+   474→                                    <SelectItem key={k} value={k}>
+   475→                                      {QUOTE_ITEM_KIND_LABELS[k]}
+   476→                                    </SelectItem>
+   477→                                  ))}
+   478→                                </SelectContent>
+   479→                              </Select>
+   480→                            </div>
+   481→                            <div>
+   482→                              <Label htmlFor={`qty-${row.uid}`} className="text-caption text-muted-foreground">
+   483→                                Qty
+   484→                              </Label>
+   485→                              <Input
+   486→                                id={`qty-${row.uid}`}
+   487→                                inputMode="numeric"
+   488→                                value={row.qty}
+   489→                                onChange={(e) => updateRow(row.uid, { qty: e.target.value.replace(/[^\d]/g, "") })}
+   490→                                placeholder="1000"
+   491→                                aria-invalid={issues.qty || undefined}
+   492→                                className="tnum mt-1 h-9 text-body-sm"
+   493→                              />
+   494→                            </div>
+   495→                            <div>
+   496→                              <Label htmlFor={`price-${row.uid}`} className="text-caption text-muted-foreground">
+   497→                                Unit price
+   498→                              </Label>
+   499→                              <div className="relative mt-1">
+   500→                                <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-body-sm text-muted-foreground" aria-hidden>
+   501→                                  $
+   502→                                </span>
+   503→                                <Input
+   504→                                  id={`price-${row.uid}`}
+   505→                                  inputMode="decimal"
+   506→                                  value={row.price}
+   507→                                  onChange={(e) => updateRow(row.uid, { price: e.target.value })}
+   508→                                  placeholder="0.62"
+   509→                                  aria-invalid={issues.price || undefined}
+   510→                                  className="tnum h-9 pl-6 text-body-sm"
+   511→                                />
+   512→                              </div>
+   513→                            </div>
+   514→                            <div className="flex items-end justify-between gap-2 sm:flex-col sm:items-end">
+   515→                              <div className="text-right">
+   516→                                <p className="text-caption text-muted-foreground">Line total</p>
+   517→                                <p className="tnum text-body-sm font-medium">
+   518→                                  {total === null ? <span className="text-muted-foreground">—</span> : <Money cents={total} />}
+   519→                                </p>
+   520→                              </div>
+   521→                              <Button
+   522→                                variant="ghost"
+   523→                                size="icon"
+   524→                                className="size-8 text-muted-foreground hover:text-[var(--status-danger-fg)]"
+   525→                                aria-label={`Remove line ${index + 1}`}
+   526→                                disabled={rows.length === 1}
+   527→                                onClick={() => setRows((rs) => rs.filter((r) => r.uid !== row.uid))}
+   528→                              >
+   529→                                <Trash2 className="size-3.5" aria-hidden />
+   530→                              </Button>
+   531→                            </div>
+   532→                          </div>
+   533→                          {(issues.description || issues.qty || issues.price) && (
+   534→                            <p className="mt-1.5 text-caption text-[var(--status-danger-fg)]">
+   535→                              {issues.description && "Description required. "}
+   536→                              {issues.qty && "Qty must be a whole number greater than 0. "}
+   537→                              {issues.price && "Unit price must be a valid dollar amount (e.g. 0.62)."}
+   538→                            </p>
+   539→                          )}
+   540→                        </div>
+   541→                      );
+   542→                    })}
+   543→                  </div>
+   544→
+   545→                  <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 border-t pt-3">
+   546→                    <Button
+   547→                      variant="outline"
+   548→                      size="sm"
+   549→                      className="gap-1.5"
+   550→                      onClick={() => setRows((rs) => [...rs, emptyRow()])}
+   551→                    >
+   552→                      <Plus className="size-3.5" aria-hidden /> Add line
+   553→                    </Button>
+   554→                    <div className="flex items-baseline gap-2">
+   555→                      <p className="text-caption text-muted-foreground">Quoted subtotal</p>
+   556→                      <MoneyWithCode cents={subtotalCents} className="text-lead font-semibold" />
+   557→                    </div>
+   558→                  </div>
+   559→                </div>
+   560→
+   561→                {/* Expiry / terms / internal note */}
+   562→                <div className="grid gap-4 sm:grid-cols-2">
+   563→                  <div className="space-y-2">
+   564→                    <Label htmlFor="quote-expiry" className="flex items-center gap-1.5 text-body-sm">
+   565→                      <CalendarDays className="size-3.5" aria-hidden /> Valid until
+   566→                    </Label>
+   567→                    <Input
+   568→                      id="quote-expiry"
+   569→                      type="date"
+   570→                      value={expiry}
+   571→                      onChange={(e) => setExpiry(e.target.value)}
+   572→                      className="h-9 text-body-sm"
+   573→                    />
+   574→                    <p className="text-caption text-muted-foreground">
+   575→                      Optional — the quotation remains open-ended when blank.
+   576→                    </p>
+   577→                  </div>
+   578→                  <div className="space-y-2">
+   579→                    <Label htmlFor="quote-terms" className="text-body-sm">
+   580→                      Terms &amp; conditions
+   581→                    </Label>
+   582→                    <Textarea
+   583→                      id="quote-terms"
+   584→                      rows={4}
+   585→                      value={terms}
+   586→                      onChange={(e) => setTerms(e.target.value)}
+   587→                      placeholder="Validity, lead time, freight, taxes…"
+   588→                      className="text-body-sm"
+   589→                    />
+   590→                  </div>
+   591→                </div>
+   592→                <div className="space-y-2">
+   593→                  <Label htmlFor="quote-internal-note" className="text-body-sm">
+   594→                    Internal note <span className="text-muted-foreground">(stored on the quotation, not shown to the customer)</span>
+   595→                  </Label>
+   596→                  <Textarea
+   597→                    id="quote-internal-note"
+   598→                    rows={3}
+   599→                    value={internalNote}
+   600→                    onChange={(e) => setInternalNote(e.target.value)}
+   601→                    placeholder="Costing basis, margin notes, follow-ups…"
+   602→                    className="bg-surface-sunken text-body-sm"
+   603→                  />
+   604→                </div>
+   605→
+   606→                {invalidRows > 0 && (
+   607→                  <div role="alert" className="flex items-start gap-2.5 rounded-[10px] bg-[var(--status-danger-bg)] px-3.5 py-2.5 text-body-sm text-[var(--status-danger-fg)]">
+   608→                    <XCircle className="mt-0.5 size-4 shrink-0" aria-hidden />
+   609→                    <p>
+   610→                      {invalidRows === 1
+   611→                        ? "One line is incomplete — every line needs a description, a quantity above 0 and a valid unit price before issuing."
+   612→                        : `${invalidRows} lines are incomplete — every line needs a description, a quantity above 0 and a valid unit price before issuing.`}
+   613→                    </p>
+   614→                  </div>
+   615→                )}
+   616→
+   617→                <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
+   618→                  <p className="max-w-sm text-caption leading-relaxed text-muted-foreground">
+   619→                    Issuing replaces the item list, notifies the customer and — for a previously issued quotation — creates
+   620→                    revision {quote.revision + 1}.
+   621→                  </p>
+   622→                  <Button
+   623→                    className="gap-1.5"
+   624→                    disabled={!rowsValid || issue.isPending}
+   625→                    onClick={() => issue.mutate()}
+   626→                  >
+   627→                    {issue.isPending ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <Send className="size-4" aria-hidden />}
+   628→                    {issue.isPending ? "Issuing…" : hasItems ? `Send revision ${quote.revision + 1} to customer` : "Send quotation to customer"}
+   629→                  </Button>
+   630→                </div>
+   631→              </div>
+   632→            </SectionCard>
+   633→          ) : (
+   634→            <div className="rounded-[14px] border border-dashed bg-surface-sunken/60 px-4 py-8 text-center">
+   635→              <FileText className="mx-auto size-5 text-muted-foreground/60" aria-hidden />
+   636→              <p className="mt-2 text-body-sm font-medium text-foreground">
+   637→                {preIssue ? "This request has not been priced yet" : "Build a new revision whenever pricing changes"}
+   638→              </p>
+   639→              <p className="mx-auto mt-1 max-w-md text-body-sm leading-relaxed text-muted-foreground">
+   640→                {preIssue
+   641→                  ? "Open the builder to itemise pricing, set terms and issue the quotation to the customer."
+   642→                  : "Re-issuing prefills the builder with the current lines and increments the revision."}
+   643→              </p>
+   644→              <Button variant="outline" className="mt-4 gap-1.5" onClick={() => openBuilderPrefilled(quote)}>
+   645→                <ClipboardList className="size-4" aria-hidden />
+   646→                {preIssue ? "Open quote builder" : "Open builder"}
+   647→              </Button>
+   648→            </div>
+   649→          )}
+   650→        </div>
+   651→
+   652→        {/* Right column — facts */}
+   653→        <div className="min-w-0 space-y-4 sm:space-y-6 lg:sticky lg:top-[84px]">
+   654→          <SectionCard title="Quotation facts">
+   655→            <dl>
+   656→              <DefRow
+   657→                label="Customer"
+   658→                value={
+   659→                  <button
+   660→                    type="button"
+   661→                    onClick={() => navigate("admin-customer-detail", { id: quote.orgId })}
+   662→                    className="text-left underline-offset-4 transition-colors hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded"
+   663→                  >
+   664→                    {quote.orgName}
+   665→                  </button>
+   666→                }
+   667→              />
+   668→              <DefRow label="Code" value={<span className="font-mono text-body-sm">{quote.orgCode}</span>} />
+   669→              <DefRow label="Requested" value={formatDateTime(quote.createdAt)} />
+   670→              {quote.issuedAt && <DefRow label="Issued" value={formatDateTime(quote.issuedAt)} />}
+   671→              {quote.expiryDate && <DefRow label="Valid until" value={formatDate(quote.expiryDate)} />}
+   672→              {quote.respondedAt && <DefRow label="Response" value={formatDateTime(quote.respondedAt)} />}
+   673→              <DefRow label="Quoted total" value={quote.itemsTotalCents > 0 ? <MoneyWithCode cents={quote.itemsTotalCents} /> : "Not yet priced"} />
+   674→            </dl>
+   675→            <div className="mt-3 border-t pt-3">
+   676→              <p className="text-caption leading-relaxed text-muted-foreground">
+   677→                Customers respond from their portal; an accepted quotation converts into a submitted order at the quoted
+   678→                unit prices.
+   679→              </p>
+   680→            </div>
+   681→          </SectionCard>
+   682→        </div>
+   683→      </div>
+   684→      </ViewEnter>
+   685→
+   686→      {/* Print-ready preview */}
+   687→      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+   688→        <DialogContent className="max-h-[85vh] overflow-y-auto bg-surface-sunken sm:max-w-[820px]">
+   689→          <DialogHeader className="border-b pb-4 sm:flex-row sm:items-center sm:justify-between">
+   690→            <DialogTitle className="text-body font-medium">
+   691→              Document preview — {quote.quoteNumber}
+   692→            </DialogTitle>
+   693→            <Button variant="outline" size="sm" className="gap-1.5" onClick={() => window.print()}>
+   694→              <Printer className="size-3.5" aria-hidden /> Print / save as PDF
+   695→            </Button>
+   696→          </DialogHeader>
+   697→          <QuoteDocument quote={quote} />
+   698→        </DialogContent>
+   699→      </Dialog>
+   700→    </div>
+   701→  );
+   702→
+   703→  function updateRow(uid: string, patch: Partial<DraftRow>) {
+   704→    setRows((rs) => rs.map((r) => (r.uid === uid ? { ...r, ...patch } : r)));
+   705→  }
+   706→}
+   707→

@@ -1,0 +1,358 @@
+# CLIENTHUB — REDESIGN V2 (supersedes the previous brief where they conflict)
+
+You are a senior product designer and design engineer. The first redesign pass (cream background, Instrument Serif headings, kraft accent, count-up numbers, noise texture) is already in the codebase. **The client rejected it.** Their feedback, verbatim in spirit:
+
+1. It still looks AI-generated.
+2. It is messy.
+3. There is too much explanatory text.
+4. It is hard to use.
+5. It is not visually stunning yet.
+6. Customers must be able to request a product Jeffery Group does not currently carry. This does not exist as a clear flow.
+
+This brief tells you exactly what to change. Follow it literally. When something here conflicts with the first brief or with what you built, **this brief wins**. Do not restart from scratch: edit the existing code. Do not change business logic, API behaviour, DTOs, or the store (the only exceptions are in Part 6, which says exactly what).
+
+Read `agent-ctx/CONTRACT.md` first for the project rules (no emojis, lucide only, money in integer cents, no new routes, TypeScript strict, lint must pass).
+
+---
+
+## PART 1. WHY IT STILL LOOKS "AI" (fix every item)
+
+These are the specific tells in the current build. Remove or replace each one.
+
+| Tell | Where | Fix |
+|---|---|---|
+| Cream background + serif display font + orange/kraft accent. This exact combination is the most recognisable generative-AI look right now. | `globals.css`, `layout.tsx`, every `font-display` use | **Drop Instrument Serif completely.** Remove the font import, the `--font-display` token and every `font-display` class. Move to the palette in Part 2. |
+| Small uppercase micro-labels ("EYEBROW", section kickers) above everything | `PageHeader`, cards, login | Delete eyebrows. Uppercase micro text is allowed **only** in table column headers. |
+| A one-sentence description under every page title, card title, dialog title and empty state | everywhere | Delete. See Part 3, the copy diet. |
+| Helper hint under every KPI number ("In production, processing or in transit") | `dashboard-view.tsx`, `admin-overview-view.tsx` | Delete. Label and number only. |
+| Count-up number animation, pulsing dots, paper grain, corrugation stripes, theme toggle on login | `dashboard-view.tsx`, `globals.css`, `login-screen.tsx`, `order-timeline.tsx` | Delete all of them. Numbers just render. |
+| Line-art placeholder product icons on white | `product-artwork.tsx` | Replace with the isometric renders in Part 5. |
+| A fake "order timeline" card on the login panel | `login-screen.tsx` | Replace with the product composition in Part 5.4. |
+| Every surface is a bordered, rounded card of equal weight | all views | Establish hierarchy: page canvas, one surface level, hairline dividers inside surfaces. No card inside a card. |
+| Icon in a tinted square before every label | KPI cells, section headers, list rows | Remove. Icons only in nav, buttons, and where they carry status meaning. |
+| Em dashes and "inspirational" microcopy ("in one quiet place", "control room") | all copy | Plain, specific language. See Part 3. |
+| Ten near-identical status pastel pills | `status-badge.tsx` | Collapse to five tones. See Part 2.3. |
+
+---
+
+## PART 2. THE NEW VISUAL SYSTEM (exact values)
+
+**Direction: "Sharp & confident".** Crisp white surfaces on a cool near-white canvas, a deep ink sidebar, one confident cobalt brand colour for actions. Think Linear, Stripe, Ramp, Mercury. Kraft survives **only** as the tint behind packaging imagery (it is the product's colour), never as a UI accent.
+
+### 2.1 Tokens (replace the values in `:root` of `globals.css`; keep variable names)
+
+```css
+--background: oklch(0.982 0.002 250);      /* canvas */
+--foreground: oklch(0.21 0.015 258);       /* ink text */
+--card: oklch(1 0 0);
+--card-foreground: oklch(0.21 0.015 258);
+--popover: oklch(1 0 0);
+--popover-foreground: oklch(0.21 0.015 258);
+--primary: oklch(0.52 0.2 267);            /* cobalt: buttons, links, focus, active */
+--primary-foreground: oklch(0.99 0 0);
+--secondary: oklch(0.96 0.004 250);
+--secondary-foreground: oklch(0.28 0.02 258);
+--muted: oklch(0.965 0.003 250);
+--muted-foreground: oklch(0.5 0.012 258);  /* must stay >= 4.5:1 on white */
+--accent: oklch(0.96 0.012 262);           /* hover wash, faint blue */
+--accent-foreground: oklch(0.32 0.1 265);
+--destructive: oklch(0.55 0.2 27);
+--border: oklch(0.925 0.004 258);
+--input: oklch(0.9 0.005 258);
+--ring: oklch(0.52 0.2 267);
+--surface-sunken: oklch(0.968 0.003 250);
+
+/* Sidebar: deep ink, light content on the right */
+--sidebar: oklch(0.19 0.02 262);
+--sidebar-foreground: oklch(0.82 0.01 258);
+--sidebar-primary: oklch(0.62 0.19 266);
+--sidebar-primary-foreground: oklch(0.99 0 0);
+--sidebar-accent: oklch(1 0 0 / 0.07);
+--sidebar-accent-foreground: oklch(0.99 0 0);
+--sidebar-border: oklch(1 0 0 / 0.08);
+--sidebar-ring: oklch(0.62 0.19 266);
+```
+
+Keep `--kraft`, `--kraft-soft`, `--kraft-ink` tokens only for product tiles. Delete `--shadow-lg`-style glows, the noise texture, `ch-soft-pulse`, and anything that references a "signature accent".
+
+Shadows (neutral, subtle): `--elev-xs: 0 1px 2px oklch(0.2 0.02 258 / .05)`, `--elev-md: 0 4px 12px oklch(0.2 0.02 258 / .08)`, `--elev-lg: 0 12px 32px oklch(0.2 0.02 258 / .14)`. Cards use **border only** (no shadow) at rest. Popovers, dialogs and sheets use `--elev-lg`.
+
+Radius: controls 8px, surfaces 12px, dialogs and sheets 16px, pills full. Set `--radius: 0.5rem` and make `Card` `rounded-xl` (12px).
+
+Remove the `.dark` theme toggle from the login screen. Leave the `.dark` block in CSS untouched.
+
+### 2.2 Typography (one family)
+
+- **Geist only.** Geist Mono for order numbers, quote numbers, SKUs. Nothing else.
+- Remove all `font-display` and the `text-display*` tokens. Replace the scale with these (define as utilities in `globals.css`, then use only these):
+
+| Token | Size / line height / weight / tracking | Use |
+|---|---|---|
+| `text-xs` | 12 / 16 / 500 | badges, timestamps, table headers (uppercase only here, +0.04em) |
+| `text-sm` | 13 / 20 / 400 | table cells in admin, secondary text |
+| `text-base` | 14 / 22 / 400 | default body, inputs, customer table cells |
+| `text-md` | 16 / 24 / 500 | list titles, card titles |
+| `text-lg` | 20 / 28 / 600 / -0.01em | section titles, dialog titles |
+| `text-xl` | 24 / 32 / 600 / -0.02em | page titles |
+| `text-2xl` | 32 / 38 / 600 / -0.025em | big numbers (KPI), login headline only |
+
+- All numbers (money, quantities, dates in tables, KPIs) use `tabular-nums`.
+- Primary text is `--foreground` (true ink). Do not set primary content in grey. Grey (`--muted-foreground`) is for secondary metadata only.
+
+### 2.3 Status colours (collapse 11 statuses to 5 tones)
+
+Define tokens `--tone-neutral|info|attention|success|danger` each with `-fg` and `-bg`:
+
+| Tone | Used for | Visual |
+|---|---|---|
+| neutral | Draft, Cancelled, Expired | grey text on `--muted` |
+| info | Confirmed, Processing, In production, Ready for shipment, Dispatched, Issued, Revised | cobalt text on faint blue |
+| attention | Submitted, Under review, Awaiting confirmation, Requested | amber text on faint amber |
+| success | Delivered, Accepted | green text on faint green |
+| danger | Rejected | red text on faint red |
+
+Badge: 22px tall, 12px/500, 8px horizontal padding, 6px radius, **no border, no dot**. The label carries the meaning (the label says "In production" vs "Dispatched"), colour carries only the group.
+
+### 2.4 Layout (apply identically on every view)
+
+- App shell: sidebar 232px (collapsed 64px), top bar 56px, content padding `24px` mobile / `32px` desktop, **max width 1200px** (customer) and **1360px** (admin tables).
+- Every view follows this skeleton and nothing else:
+  1. **Header row:** title (`text-xl`) left, at most **one** filled primary button right (plus at most one outline/ghost secondary). No description line.
+  2. **Toolbar row** (only if the view has a list): search input, filter chips or tabs, view toggle.
+  3. **Content:** a single surface (white, 1px border, 12px radius) containing the table or the sections, separated by hairlines. Two-column layouts use a 12-column grid, main content 8 cols, side panel 4 cols (sticky).
+- Vertical rhythm: 24px between header, toolbar and content; 32px between major sections. Do not mix other gaps.
+- Table rows: 48px customer, 40px admin. Header 36px, `--surface-sunken`, `text-xs` uppercase. Numeric columns right-aligned. No zebra. Hover = `--accent`. Whole row clickable with visible focus ring. Never more than 6 visible columns on desktop; push the rest into the detail view.
+- One filled (primary) button per screen region. Everything else is outline or ghost.
+- Minimum touch target 44px on mobile for buttons, nav items, row actions.
+
+### 2.5 Motion (minimal)
+
+Only: view fade-in (150ms, opacity only, no translate), button press (scale 0.98), dialogs and sheets (180ms fade and 4px slide), hover colour transitions (120ms). Delete count-up, stagger, pulse, shimmer-heavy skeletons (use a plain static muted skeleton block with a very slow 2.4s opacity pulse). Respect `prefers-reduced-motion`.
+
+---
+
+## PART 3. THE COPY DIET (the client says there is far too much text)
+
+**Rule: if the user can already see it or can guess it, delete it.**
+
+### 3.1 Hard rules
+1. **No description under any page title, section title, card title, table, dialog title or empty state**, except a dialog that is destructive or irreversible, or a form field whose purpose is not obvious.
+2. Titles are 1 to 3 words, sentence case. ("Orders", "Request a product", "Recent orders".)
+3. Buttons are verb or verb + noun: "Submit order", "Reorder", "Request a quote". Never "Click here", never "Get started".
+4. Empty states: one short line and one button. Maximum 8 words in the line.
+5. Toasts: title only, 1 to 4 words ("Order submitted", "Saved"). Add a description only for errors, and then say what to do.
+6. Table column headers: 1 word where possible.
+7. **No em dashes (—) and no en dashes in UI copy.** Use a period, a comma, or restructure.
+8. Banned words and phrases anywhere in the UI: "at a glance", "in one place", "seamless", "effortless", "quiet", "control room", "intelligence", "professionally", "streamline", "powerful", "everything you need", "stay on top of", "your account at a glance", "Here's an overview", "newest first", "work best".
+9. Dates and numbers speak for themselves. "Est. delivery Thu 14 Nov", not "Your estimated delivery date is".
+10. Inputs use placeholder only when it adds an example ("e.g. 10 x 10 x 5 cm"). Never repeat the label.
+
+### 3.2 Before and after (apply the same logic everywhere else)
+
+| Location | Before | After |
+|---|---|---|
+| Dashboard heading | "Good afternoon, Maria." + org line + "Here's an overview of your packaging orders and account activity with Maple Leaf Pizzeria." | "Good afternoon, Maria" (nothing else) |
+| Dashboard KPI | "Active Orders / In production, processing or in transit" | "Active orders" + number |
+| Dashboard section | "Recent orders — Requests submitted by your team, newest first." | "Recent orders" + "View all" link |
+| Expected updates | "Expected updates — Jeffery Group's next promised update, by order" | "Next updates" (rows already show the date) |
+| Empty orders | "No orders yet — your first order request will appear here." | "No orders yet." + [Browse products] |
+| Catalogue | title + long subtitle | "Products" |
+| Admin overview | "Operations at a glance — orders, quotations, customers and support across the Jeffery Group portal." | "Overview" |
+| Admin attention | "Everything that needs a decision, reply, or update — in one place." | "Attention" with a count |
+| Admin customers | "Every organization on the portal — trading history, primary contacts and account status." | "Customers" |
+| Admin pricing | "The customer pricing control room — per-product overrides…" | "Pricing" |
+| Admin templates | "Reusable, professionally written starting points for customer updates." | "Update templates" |
+| Admin settings | "Catalogue categories, the order fulfilment workflow and company defaults…" | "Settings" |
+| Login subtitle | "Use the account provided by Jeffery Group to access your portal." | "Sign in to ClientHub" |
+| Login demo block | "This deployment contains clearly-labelled sample data. Select an account to sign in instantly." | "Demo accounts" (the list is self-explanatory) |
+| Password toast | long explanation | "Contact your account manager to reset it." |
+
+Run this audit: `grep -rnE "description=|<DialogDescription|text-muted-foreground" src/components` and review every hit. Aim to delete **at least 70%** of explanatory sentences. Keep a description only when removing it would make a user make a mistake.
+
+---
+
+## PART 4. HOW IT SHOULD BE USED (usability, exactly)
+
+The client finds the site hard to use. The cause: 12 sidebar items, split flows, buried primary actions, and too many clicks for repeat orders. Fix:
+
+### 4.1 Navigation
+- **Customer sidebar (6 items):** Home, Products, Orders, Quotes, Documents, Messages. (Labels only; keep the same `view` names: dashboard, catalog, orders, quotations, documents, support.)
+- **Top bar, right side:** search field (opens existing `GlobalSearch`, shows `Ctrl K` hint), **Cart button** (bag icon, item count in a cobalt pill, subtotal on desktop; navigates to `cart`), notifications bell (popover, existing), avatar menu.
+- **Avatar menu:** Settings, Notifications (full page), Support, Sign out. This removes Settings and Notifications from the sidebar.
+- **Admin sidebar (grouped, 10 items):**
+  - Work: Attention, Orders, Quotes
+  - Manage: Customers, Products, Pricing, Documents
+  - Communicate: Notifications, Templates
+  - Admin: Users, Settings (collapsed under a single "Admin" group label at the bottom)
+  - "Overview" becomes a tab at the top of the Attention view only if that does not require logic changes; otherwise keep it as the first item under Work.
+- Active nav item: `--sidebar-accent` background, white text, no side bar marker, no sliding indicator.
+- Sidebar group labels: `text-xs`, sidebar-foreground at 50% opacity, sentence case, not uppercase.
+
+### 4.2 Fewer clicks for the main jobs
+Target: **reorder in 2 clicks, submit a fresh order from the catalogue in 5 clicks, find an order's status in 1 click.**
+
+- **Catalogue card quick-add:** each card gets a compact quantity stepper (default = product MOQ, step = increment, both already on the DTO) and an "Add" button, **without leaving the page**. After adding, the Cart button in the top bar updates and a toast shows "Added" with a "View cart" action. Clicking the card body still opens product detail.
+- **Catalogue density toggle:** grid or table. Table rows show image thumbnail, name, SKU, price, stepper, Add. Persist the choice in `localStorage` inside try/catch.
+- **Orders list:** segmented tabs "Active", "Delivered", "All" with counts (default Active); one search box. Each row shows: order number, items summary, status badge, estimated delivery, total. **Hovering or focusing a row reveals a "Reorder" ghost button** on the right (uses the existing reorder-data flow). No other buttons in rows.
+- **Order detail:** the first thing on the page is a **status bar**: status badge, one sentence of the latest update, estimated delivery date, and the single most relevant action (Track, Request change, or Reorder depending on status). Timeline below. Side panel: items, totals, address, documents. Delete duplicated information.
+- **Cart:** one page, no numbered steps. Left: line items (stepper, line total, remove). Below: delivery date, address, PO number, notes in a two-column form. Right: sticky summary and one "Submit order" button. Show a small "Draft saved" text near the title when autosave happens. Validation errors appear inline under the field with a specific message.
+- **Quotes:** list identical in structure to Orders (tabs "Open", "Closed", "All"). Quote detail has the Accept, Request revision, Decline actions in a sticky footer bar.
+- **Global keyboard:** `Ctrl/Cmd K` opens search, `/` focuses the page search input, `Esc` closes sheets.
+- **Forms:** never more than one column on mobile; labels above fields; required fields marked with a small asterisk; Enter submits single-field forms; primary button disabled only while submitting (not for invalid input, so errors can be shown).
+
+### 4.3 Admin usability
+- **Attention** is the landing view. Layout: a single list grouped by "Overdue", "Today", "Later", each row = customer, what is needed, age, **one primary action button on the row** (Review, Reply, Update). No sub-descriptions.
+- **Orders list rows** have a "⋯" menu with Accept, Decline, Request changes, Publish update so common actions take 2 clicks without opening the order.
+- **Order detail:** status is a dropdown button in the header (one click to change). "Publish update" opens a right-side Sheet with: template picker, message, delay toggle with revised date, and a live preview of what the customer sees. Internal notes live in a separate tab labelled "Internal" with a lock icon.
+- Tables get sticky headers and a sticky toolbar (search, filter chips). Row height 40px. No more than 6 columns.
+- Pricing matrix: keep the grid; make cells inline-editable with Enter to save and Esc to cancel; changed cells get a small blue corner mark.
+
+---
+
+## PART 5. MAKING IT VISUALLY STUNNING
+
+A premium feel comes from **real imagery, tight alignment, and restraint**, not decoration.
+
+### 5.1 Product imagery: isometric renders (biggest visual upgrade)
+Replace `product-artwork.tsx` line-art with **procedurally generated isometric renders**, so every product looks like a studio shot.
+
+1. Create `src/components/shared/iso.tsx` with SVG helpers:
+   - `iso(x, y, z)` returns screen coordinates using `X = (x - y) * cos(30deg) * s`, `Y = (x + y) * sin(30deg) * s - z * s`.
+   - `<Prism w d h tone/>` draws a box with three polygons: **top** (lightest), **left** (mid), **right** (darkest). Optional `lid` offset and `open` flaps for cartons.
+   - `<Cylinder r h tone/>` with elliptical top, side body with a linear gradient from light to dark, optional `taper` for cups and bowls.
+   - `<GroundShadow/>`: blurred ellipse (`feGaussianBlur stdDeviation=6`, black at 10% opacity) under the object.
+2. Light comes from the top-left. Three-tone shading per hue: top L=0.95, left L=0.86, right L=0.76 (oklch, chroma ~0.03).
+3. Compose each product from the primitives: carton (open-flap box), pizza box (flat wide prism with lid line), clamshell (hinged prism), cup (tapered cylinder + lid), bowl (wide tapered cylinder), deli tub (short tapered cylinder + lid), kraft bag (tall prism with fold line and handle), soup container, wrap/film roll (cylinder on its side), custom mailer (prism with printed panel).
+4. Add a "print" detail on the front face: a small lighter rectangle or circle as a placeholder logo, no text.
+5. Colour families: kraft (cartons, pizza boxes, bags), clear/grey (PET, PP), white (cups, bowls). Tile background: `radial-gradient(circle at 50% 30%, #fff, oklch(0.965 0.004 250))` for white and grey; `--kraft-soft` for kraft.
+6. Keep the same props (`sku`, `compact`, `className`) so no call sites change. Rendered 4:3 on cards, 1:1 in table thumbnails (48px).
+
+### 5.2 Surfaces and depth
+- Canvas `--background`. Surfaces `--card` with 1px `--border`. Nothing else. No gradients in the UI chrome, no glow, no blur except the sticky top bar (`backdrop-blur-sm` over 85% white).
+- Hover on interactive cards: border colour goes to `oklch(0.85 0.01 258)` and `--elev-md` appears. Nothing moves.
+
+### 5.3 Dashboard layout (exact)
+1. Greeting (`text-xl`) left, primary "Browse products" + outline "Request a product" right.
+2. **KPI row:** four stats in one surface divided by hairlines. Each cell: label (`text-sm`, muted) above number (`text-2xl`, ink). Clickable. No icons, no hints, no delta unless the DTO provides it.
+3. Two columns (8/4):
+   - Left: "Active orders" as a list of **order progress rows**: order number, items summary, a thin 4px progress bar (width = stage fraction, cobalt), status label, estimated delivery. This replaces the generic table and is the most useful thing a customer sees. Below it, "Reorder" as a horizontal row of up to 4 compact product tiles (isometric thumbnail, name, last quantity, "Reorder" button).
+   - Right: "Needs your attention" (change requests awaiting reply, quotes to accept, unread messages), then "Recent activity" as a plain list with relative times. No timeline spine, no icon circles.
+
+### 5.4 Login (exact)
+- Two columns 50/50. Left: solid deep ink (`--sidebar`) panel with the ClientHub mark top-left, a **composition of 4 to 5 isometric packaging objects** (carton, pizza box, cup, bag) arranged on a subtle isometric grid floor (1px lines at 6% white), headline `text-2xl` "Packaging orders, simplified" (sentence case, no period, no sub-paragraph), nothing else. No blobs, no stripes, no mock timeline card.
+- Right: form on white. "Sign in to ClientHub" (`text-xl`), email, password (with show toggle), full-width cobalt button "Sign in", "Forgot password?" link. Demo accounts underneath as a compact 4-row list (org + role). Remove the "Remember me for 30 days" label length ("Keep me signed in"). Remove the theme toggle.
+- Mobile: single column, mark on top.
+
+### 5.5 Shell details
+- Brand mark + "ClientHub" in the sidebar top (white). Under it nothing (drop the "Jeffery Group Ltd." sub-label; put the company name in the avatar menu header).
+- Avatar: 32px circle, initials, `--primary` background.
+- Top bar: breadcrumb or page title (`text-md`) left; actions right as in 4.1. No title duplication (the page header already says it); on desktop the top bar shows only search, cart, bell, avatar, and the back button on detail views.
+
+### 5.6 Details that read as "designed"
+- Align everything to a 4px grid. Optically align icons with text baselines (icon 16px, gap 8px).
+- Consistent icon stroke 1.75 (set `strokeWidth` via a CSS rule on lucide svgs).
+- Focus ring: 2px `--ring` with 2px offset on all interactives.
+- Inputs 40px high, 8px radius, white, `--input` border, focus border `--ring` plus 3px ring at 20% alpha.
+- Buttons: 36px default, 32px sm, 40px lg. Primary cobalt with a 1px inner top highlight. Outline = white with border. Ghost = transparent. Destructive = red, used only inside confirm dialogs.
+- Dialogs: max 480px wide (forms up to 640px), title `text-lg`, footer right-aligned with "Cancel" (ghost) then primary. Large forms use a right-side **Sheet** (480 to 560px), not a modal.
+- Skeletons mirror real layout dimensions exactly.
+- Scrollbars thin and neutral.
+
+---
+
+## PART 6. NEW FEATURE: "REQUEST A PRODUCT WE DON'T CARRY"
+
+Customers must be able to ask Jeffery Group for a product that is not in their catalogue. This reuses the quotation system (so admins already have a workflow) and adds a clear, friendly entry point.
+
+### 6.1 Customer flow
+
+**Entry points (all open the same right-side Sheet `ProductRequestSheet`):**
+1. Catalogue: the **last tile in the grid** (and the last row in table view) is a dashed-border card with a plus icon: "Can't find it? Request a product". Always visible.
+2. Catalogue search with **zero results**: the empty state's primary button is `Request "{query}"` with the query prefilled as the product name.
+3. Dashboard header: "Request a product" outline button.
+4. Quotes view header: primary button "Request a product" (the existing "New quote" dialog stays for price quotes on existing products; rename its button "Request a quote").
+5. Top-bar `+` menu is **not** needed; do not add it.
+
+**The sheet (480px, one scroll, three sections with plain `text-md` titles, no step numbers):**
+
+1. **Product**
+   - Product name* (text)
+   - Type* (select: Box or carton, Pizza box, Bag, Cup or lid, Container or tub, Film or wrap, Mailer, Label or sticker, Other)
+   - Description (textarea, 3 rows, placeholder "What is it used for?")
+   - Reference file (optional): only if an existing upload path can be reused without new backend work; otherwise omit and list it in the final report as a follow-up.
+2. **Specification**
+   - Size: three small numeric inputs L, W, H plus a unit select (mm, cm, in)
+   - Material (select: Kraft paper, Corrugated board, Paperboard, PET, PP, Other)
+   - Printing (select: None, 1 colour, 2 colours, Full colour)
+   - Food contact (switch, default on)
+3. **Order**
+   - Quantity per order* (number)
+   - Expected yearly volume (number, optional)
+   - Needed by (date picker, optional)
+   - Delivery address (select of the organisation's saved addresses, default address preselected)
+
+Footer: "Cancel" and a primary "Send request". On success: close the sheet, toast "Request sent", navigate to the new quote's detail (`quote-detail`) so the customer sees it immediately.
+
+Validation: only the starred fields are required. Errors inline. Do not block on optional fields.
+
+### 6.2 Data mapping (no new endpoint)
+Submit to the existing `POST /api/customer/quotations`. Map fields onto the existing columns:
+- `title` = product name
+- `category` = Type
+- `productName` = product name
+- `dimensions` = "L x W x H unit"
+- `material`, `printing` as chosen
+- `quantity` = quantity per order (string, as the column is a string)
+- `neededBy`, `destination` (selected address as a one-line string)
+- `specs` = description + "Food contact: yes/no" + "Yearly volume: N"
+
+**One allowed schema change:** add `kind String @default("QUOTE")` to `model Quotation` in `prisma/schema.prisma` (values `QUOTE` or `NEW_PRODUCT`). Run `bun run db:push` and `bun run db:generate`. Update `src/app/api/customer/_validation.ts` (optional `kind` enum, default `QUOTE`), the DTO types in `src/types/index.ts` (add `kind` to the quotation list and detail DTOs), `serialize.ts`, and the create route so it stores `kind`. The new sheet sends `kind: "NEW_PRODUCT"`. The create route must also send the admin notification with the title "New product request <quote#>" when `kind` is `NEW_PRODUCT`. Do not touch seed data except to set `kind` for nothing (defaults cover it).
+
+### 6.3 Presentation
+- Quotes list (customer and admin): rows with `kind === "NEW_PRODUCT"` show a small neutral tag "New product" next to the title. Add a filter chip "New products" to the admin quotes toolbar.
+- Quote detail for `NEW_PRODUCT`: heading "Product request", spec shown as a clean two-column key/value list, the same status timeline as quotes, and the same Accept, Revise, Decline actions once issued.
+
+### 6.4 Admin follow-through
+- Admin quote detail, for `NEW_PRODUCT` requests: a secondary button **"Add to catalogue"** that opens the existing product-create form (from `admin-products-view.tsx`) **prefilled** with name, category match, and description. After the product is created, grant the requesting organisation access using the existing `POST /api/admin/products/access` endpoint, and post a customer notification "Your requested product is now in your catalogue" (existing notification helper). If wiring the prefill requires large changes to `admin-products-view.tsx`, extract the create form into a small shared component first, then reuse it; do not duplicate it.
+- Attention view surfaces new product requests like any quote request.
+
+---
+
+## PART 7. EXECUTION (strict order, with stops)
+
+Work in these phases. **After each phase: run `bun run lint`, `npx tsc --noEmit`, open the app, take Playwright screenshots (Chromium is installed; widths 390, 768, 1280, 1536) of every view touched, look at each screenshot, fix problems, then post a short summary and wait.** Do not start the next phase until the previous one looks right.
+
+**Phase A. Foundation reset.**
+Tokens (2.1), typography (2.2, delete serif), tone-based badges (2.3), motion cleanup (2.5), Card, Button, Input, Select, Table, Tabs, Dialog, Sheet, Badge, Skeleton, `PageHeader` (title + actions only; delete eyebrow and description props' rendering but keep the props so call sites compile; description renders nothing), `KpiCard`/`KpiStrip`, `EmptyState` (title + optional button), `StatusBadge`, `order-timeline`, `update-timeline`.
+
+**Phase B. Shell and login.**
+Sidebar, top bar, avatar menu, cart button, grouped admin nav (4.1, 5.5), login (5.4). New isometric artwork (5.1) lands here too.
+
+**Phase C. Customer portal.**
+Dashboard (5.3), catalogue with quick-add and table toggle (4.2), product detail, orders list and detail (4.2), cart (4.2), quotes list and detail, documents, messages, settings, notifications. Apply the copy diet (Part 3) to every file as you touch it.
+
+**Phase D. Request a product (Part 6).** Schema, validation, sheet, entry points, admin presentation, "Add to catalogue".
+
+**Phase E. Admin.**
+Attention, orders list with row actions, order detail with publish-update sheet, customers, customer detail, products, pricing matrix, quotes (with New products filter), documents, notifications, templates, users, settings, overview.
+
+**Phase F. Final audit.**
+1. Copy audit: re-run the Part 3 grep, confirm no banned phrases, no em dashes (`grep -rn "—" src/components`), no `font-display`, no eyebrows.
+2. Search for stray `text-[Npx]` and `oklch(` or `rgb(` literals in components; replace with the scale and tokens.
+3. Click-count test: reorder from Orders (2 clicks), add from catalogue to cart (2 clicks), submit order (cart to Submit), request a product (entry to sent), admin accept order from list (2 clicks).
+4. Keyboard pass on login, catalogue, cart, sheets. Contrast check on muted text. Reduced-motion check. Print preview of a quotation still works.
+5. Lighthouse accessibility >= 95 on login and dashboard.
+
+---
+
+## PART 8. WHAT "DONE" LOOKS LIKE
+
+- A first-time visitor sees a deliberate, confident product, not a template: deep ink sidebar, white surfaces, cobalt actions, isometric packaging imagery, no decorative effects.
+- Every view has a title, one primary action, and content. No explanatory sentences under titles.
+- A repeat customer can reorder in 2 clicks and add catalogue items without leaving the page.
+- A customer can request a product Jeffery Group does not stock from the catalogue grid, an empty search, the dashboard, or the Quotes page, and the admin can turn it into a catalogue product in 2 clicks.
+- Customer sidebar has 6 items, admin sidebar is grouped, and Settings and Notifications live in the avatar menu for customers.
+- Lint and type check are clean; no existing flow is broken (sign in as customer and admin, add to cart, submit order, request a quote, accept a quote, view order timeline, submit a change request, publish an update, change status, edit pricing, reply to a message).
+
+## FINAL REPORT FORMAT
+List: files changed, new components, schema change, anything not done and why, bugs noticed but left alone. Include the screenshot file paths for each phase. **Do not mark a phase complete without having looked at its screenshots.**

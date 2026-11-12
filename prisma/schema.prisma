@@ -1,0 +1,550 @@
+// ClientHub — Jeffery Group Ltd.
+// B2B Customer Portal & Order Management Platform
+//
+// Conventions:
+// - All monetary values are stored as INTEGER CENTS (CAD). Never floats.
+// - Enum-like values are stored as Strings (SQLite has no native enums) and
+//   validated in the application layer via src/lib/constants.ts
+// - Flexible spec blobs are stored as JSON strings.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Organizations & Users
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Organization {
+  id              String   @id @default(cuid())
+  code            String   @unique // e.g. JG-C1001
+  name            String
+  status          String   @default("ACTIVE") // ACTIVE | SUSPENDED
+  billingLine1    String   @default("")
+  billingCity     String   @default("")
+  billingProvince String   @default("")
+  billingPostal   String   @default("")
+  phone           String   @default("")
+  // Internal notes — NEVER exposed through customer APIs
+  internalNotes   String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  users         User[]
+  addresses     Address[]
+  orders        Order[]
+  quotations    Quotation[]
+  documents     Document[]
+  notifications Notification[]
+  messages      Message[]
+  productAccess ProductAccess[]
+  prices        CustomerPrice[]
+  drafts        OrderDraft[]
+  savedProducts SavedProduct[]
+  // Customer relationship preferences — internal, admin-visible only
+  // JSON: {preferredContactUserId, preferredContactMethod, deliveryInstructions}
+  preferences   String?
+}
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  name         String
+  passwordHash String
+  role         String    @default("CUSTOMER") // ADMIN | CUSTOMER
+  // Customer-organization permission level (admins ignore this field)
+  orgRole      String    @default("ORG_ADMIN") // ORG_ADMIN | PURCHASING | READONLY
+  title        String? // e.g. "Purchasing Manager"
+  phone        String?
+  status       String    @default("ACTIVE") // ACTIVE | INVITED | DISABLED
+  notifyPrefs  String    @default("{}") // JSON: {orderUpdates, quoteUpdates, documents, emailDigest}
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  orgId         String?
+  organization  Organization?        @relation(fields: [orgId], references: [id])
+  orders        Order[]
+  statusHistory OrderStatusHistory[]
+  quotations    Quotation[]
+  messages      Message[]
+  savedProducts SavedProduct[]
+  drafts        OrderDraft[]
+}
+
+model Address {
+  id        String  @id @default(cuid())
+  orgId     String
+  label     String // e.g. "Main Warehouse"
+  line1     String
+  line2     String?
+  city      String
+  province  String
+  postal    String
+  country   String  @default("Canada")
+  isDefault Boolean @default(false)
+  // Customer-requested addresses await administrator approval
+  approvalStatus String   @default("APPROVED") // APPROVED | PENDING | DECLINED
+  requestedById   String? // snapshot of requesting user id
+  requestedByName  String? // snapshot: "M. Chen (Maple Leaf)"
+  requestedAt     DateTime?
+  reviewedAt       DateTime?
+  reviewNote       String?
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Catalogue & Pricing
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Category {
+  id          String  @id @default(cuid())
+  name        String
+  slug        String  @unique
+  description String?
+  sortOrder   Int     @default(0)
+
+  products Product[]
+}
+
+model Product {
+  id                String   @id @default(cuid())
+  sku               String   @unique
+  name              String
+  categoryId        String
+  shortDescription  String
+  description       String
+  material          String?
+  dimensions        String? // display string e.g. "12 × 8 × 8 in"
+  colour            String?
+  printingOptions   String?
+  casePack          Int      @default(1) // units per case
+  palletPack        Int?
+  minOrderQty       Int      @default(1)
+  increment         Int      @default(1) // order quantity must be a multiple
+  unit              String   @default("each") // each | case
+  // null => quotation required, no default price published
+  defaultPriceCents Int?
+  stockStatus       String   @default("IN_STOCK") // IN_STOCK | MADE_TO_ORDER | ENQUIRY_ONLY
+  leadTimeNote      String?
+  isActive          Boolean  @default(true)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  category   Category        @relation(fields: [categoryId], references: [id])
+  access     ProductAccess[]
+  prices     CustomerPrice[]
+  orderItems OrderItem[]
+  savedBy    SavedProduct[]
+}
+
+// Which products are visible/approved for which customer
+model ProductAccess {
+  id        String  @id @default(cuid())
+  orgId     String
+  productId String
+  approved  Boolean @default(true)
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  product      Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, productId])
+}
+
+// Customer-specific negotiated pricing. Overrides Product.defaultPriceCents.
+model CustomerPrice {
+  id            String   @id @default(cuid())
+  orgId         String
+  productId     String
+  priceCents    Int
+  effectiveFrom DateTime @default(now())
+  note          String? // e.g. "Agreed 2024 volume rate"
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  product      Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, productId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Orders
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Order {
+  id                String    @id @default(cuid())
+  orderNumber       String    @unique // e.g. ORD-2024-0128
+  orgId             String
+  userId            String // customer user who submitted
+  status            String    @default("SUBMITTED")
+  /**
+   * SUBMITTED | UNDER_REVIEW | AWAITING_CONFIRMATION | CONFIRMED | PROCESSING |
+   * IN_PRODUCTION | READY_FOR_SHIPMENT | DISPATCHED | DELIVERED | CANCELLED | REJECTED
+   */
+  subtotalCents     Int       @default(0)
+  taxCents          Int       @default(0)
+  totalCents        Int       @default(0)
+  taxRateBp         Int       @default(0) // basis points, e.g. 1300 = 13%
+  shippingText      String    @default("")
+  poNumber          String?
+  notes             String?
+  requestedDelivery String? // free text: date or description
+  estimatedDelivery DateTime?
+  trackingNumber    String?
+  reorderSource     String? // original order number if a reorder
+  // ── Explicit milestone dates (never conflated) ──
+  requestedDeliveryDate DateTime? // customer's preferred date (a REQUEST, not a promise)
+  estimatedDispatch     DateTime? // estimated dispatch date
+  revisedDeliveryDate   DateTime? // revised estimated delivery (post-delay)
+  nextUpdateDate        DateTime? // when the customer should next hear from us
+  actualDeliveryDate    DateTime? // confirmed delivered-on date
+  // ── Provenance: portal vs. recorded on behalf (phone / email walk-ins) ──
+  sourceType         String    @default("PORTAL") // PORTAL | EMAIL | PHONE | IN_PERSON
+  recordedById       String? // admin who recorded an offline order
+  recordedByName     String? // snapshot: "M. Chen (Admin)"
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  organization Organization         @relation(fields: [orgId], references: [id])
+  user         User                 @relation(fields: [userId], references: [id])
+  items        OrderItem[]
+  history      OrderStatusHistory[]
+  documents    Document[]
+  updates      OrderUpdate[]
+  internalNotes OrderInternalNote[]
+  changeRequests OrderChangeRequest[]
+  dismissals   AttentionDismissal[]
+}
+
+// Snapshot of what was actually ordered — preserved as a historical record
+model OrderItem {
+  id             String  @id @default(cuid())
+  orderId        String
+  productId      String?
+  sku            String
+  name           String
+  qty            Int
+  unitPriceCents Int // snapshot at order time
+  lineTotalCents Int
+  note           String?
+  // JSON: { specs?: {dimensions, material, thickness, printing, colour, custom},
+  //         attachments?: [{name, sizeLabel}] } — per-line extras at submit time
+  specJson       String?
+
+  order   Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product? @relation(fields: [productId], references: [id])
+}
+
+model OrderStatusHistory {
+  id        String   @id @default(cuid())
+  orderId   String
+  status    String
+  note      String?
+  byUserId  String?
+  byName    String? // snapshot: "M. Chen (Admin)" or customer name
+  createdAt DateTime @default(now())
+
+  order  Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  user   User?   @relation(fields: [userId], references: [id])
+  userId String?
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Quotations
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Quotation {
+  id              String    @id @default(cuid())
+  quoteNumber     String    @unique // e.g. Q-2024-031
+  orgId           String
+  userId          String // requester
+  status          String    @default("REQUESTED")
+  /**
+   * REQUESTED | UNDER_REVIEW | ISSUED | ACCEPTED | REJECTED | EXPIRED | REVISED | CANCELLED
+   */
+  revision        Int       @default(0) // increments when admin re-issues
+  /** QUOTE (default) | NEW_PRODUCT — a request for a product we do not carry */
+  kind            String    @default("QUOTE")
+  // Customer's request
+  title           String
+  category        String?
+  productName     String?
+  dimensions      String?
+  material        String?
+  colour          String?
+  printing        String?
+  quantity        String?
+  neededBy        String?
+  destination     String?
+  specs           String?
+  comments        String?
+  // Issued quote content
+  itemsTotalCents Int       @default(0)
+  expiryDate      DateTime?
+  terms           String?
+  internalNote    String?
+  // ── Provenance: portal request vs. issued on behalf (email / phone) ──
+  sourceType      String    @default("PORTAL") // PORTAL | EMAIL | PHONE | IN_PERSON
+  recordedById    String? // admin who issued the quote on the customer's behalf
+  recordedByName  String? // snapshot: "M. Chen (Admin)"
+  createdAt       DateTime  @default(now())
+  issuedAt        DateTime?
+  respondedAt     DateTime?
+  respondedNote   String?
+
+  organization Organization    @relation(fields: [orgId], references: [id])
+  user         User            @relation(fields: [userId], references: [id])
+  items        QuotationItem[]
+  documents    Document[]
+}
+
+model QuotationItem {
+  id             String @id @default(cuid())
+  quotationId    String
+  description    String
+  kind           String @default("PRODUCT") // PRODUCT | SETUP | FREIGHT | OTHER
+  qty            Int    @default(1)
+  unitPriceCents Int
+  lineTotalCents Int
+
+  quotation Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Documents (Demo file registry — generated files are clearly-labelled demos)
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Document {
+  id          String   @id @default(cuid())
+  orgId       String
+  orderId     String?
+  quotationId String?
+  category    String   @default("OTHER")
+  /**
+   * INVOICE | PURCHASE_ORDER | QUOTATION | STATEMENT | SPECIFICATION |
+   * DELIVERY_RECEIPT | OTHER
+   */
+  title       String
+  description String?
+  fileName    String
+  sizeLabel   String   @default("—")
+  version     Int      @default(1)
+  uploadedBy  String   @default("Jeffery Group")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  order        Order?       @relation(fields: [orderId], references: [id])
+  quotation    Quotation?   @relation(fields: [quotationId], references: [id])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Order Update Centre, Change Requests, Drafts, Templates, Preferences
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Saved, incomplete order request — the customer resumes where they left off.
+model OrderDraft {
+  id        String   @id @default(cuid())
+  orgId     String
+  userId    String
+  name      String   @default("Untitled draft")
+  // JSON: { lines: DraftLine[], delivery: {...}, reference: {...}, attachments: [...] }
+  payload   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// Customer-facing progress update, authored by an administrator.
+// Unpublished rows are drafts — never exposed through customer APIs.
+model OrderUpdate {
+  id                 String    @id @default(cuid())
+  orderId            String
+  authorId           String? // admin user id (nullable for system-authored)
+  authorName         String
+  title              String
+  category           String   @default("INFO")
+  /**
+   * ORDER_ACCEPTED | PREPARATION | PRODUCTION | PRODUCTION_COMPLETED |
+   * READY_DISPATCH | SHIPMENT | DELIVERY | DELAY | INFO | COMPLETED
+   */
+  newStatus          String? // order status applied when published
+  message            String
+  estimatedDelivery  DateTime? // updated estimate communicated in this update
+  revisedDelivery    DateTime? // revised estimate communicated in this update
+  nextUpdateDate     DateTime? // next-expected-update date communicated in this update
+  // JSON: [{name, sizeLabel}] — attachment metadata registered with the update
+  attachmentsJson    String?
+  isPublished        Boolean   @default(false)
+  publishedAt        DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId, isPublished, publishedAt])
+}
+
+// Internal administrative note — NEVER exposed through customer APIs.
+model OrderInternalNote {
+  id         String   @id @default(cuid())
+  orderId    String
+  authorId   String?
+  authorName String
+  body       String
+  createdAt  DateTime @default(now())
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+}
+
+// Customer-initiated change request against an existing order.
+// The original order is only modified when an administrator ACCEPTS
+// (or the customer accepts an administrator's counter-proposal).
+model OrderChangeRequest {
+  id               String    @id @default(cuid())
+  orderId          String
+  requestedById    String
+  requestedByName  String
+  status           String    @default("PENDING")
+  /** PENDING | ACCEPTED | DECLINED | COUNTERED | WITHDRAWN */
+  requestNote      String?
+  // JSON: ChangeItem[] — exactly what the customer asked for, including the
+  // pre-change values, preserved as the historical record of the original.
+  changesJson      String
+  adminId          String?
+  adminName        String?
+  decisionNote     String?
+  decidedAt        DateTime?
+  // JSON: ChangeItem[] — the administrator's alternative proposal, awaiting
+  // customer review (status COUNTERED)
+  counterJson      String?
+  counterDecidedAt DateTime? // when the customer accepted/declined the counter
+  counterDecision  String? // ACCEPTED | DECLINED (customer's response)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt])
+}
+
+// Reusable update message templates with {{placeholders}}.
+model UpdateTemplate {
+  id            String   @id @default(cuid())
+  title         String
+  category      String   @default("INFO")
+  body          String
+  isDefault     Boolean  @default(false) // seeded, professionally written
+  createdById   String?
+  createdByName String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+// Frequently-ordered products saved by a customer for one-click reorder.
+model SavedProduct {
+  id        String   @id @default(cuid())
+  orgId     String
+  userId    String
+  productId String
+  qty       Int      @default(1)
+  note      String?
+  createdAt DateTime @default(now())
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product      Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, productId])
+}
+
+// Admin dismissal of an Attention Centre item ("reviewed / resolved").
+// Hidden until the underlying condition changes again.
+model AttentionDismissal {
+  id          String   @id @default(cuid())
+  orderId     String
+  section     String // e.g. NEEDS_UPDATE | UPCOMING_DELIVERY
+  dismissedBy String?
+  dismissedAt DateTime @default(now())
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@unique([orderId, section])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Notifications, Messages, Audit, Email outbox
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Notification {
+  id        String   @id @default(cuid())
+  audience  String   @default("CUSTOMER") // CUSTOMER | ADMIN
+  orgId     String? // null for admin-audience notifications
+  userId    String? // optional per-user targeting
+  title     String
+  body      String
+  kind      String   @default("SYSTEM") // ORDER | QUOTATION | DOCUMENT | MESSAGE | SYSTEM
+  view      String? // frontend view key e.g. "orders", "order-detail"
+  relatedId String? // orderId / quotationId / documentId
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  organization Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
+}
+
+model Message {
+  id          String    @id @default(cuid())
+  orgId       String
+  userId      String
+  subject     String
+  category    String    @default("GENERAL")
+  /**
+   * ORDER | PRODUCT | QUOTATION | INVOICE | DELIVERY | GENERAL
+   */
+  orderId     String?
+  quotationId String?
+  body        String
+  status      String    @default("OPEN") // OPEN | ANSWERED
+  reply       String?
+  repliedAt   DateTime?
+  repliedBy   String?
+  createdAt   DateTime  @default(now())
+
+  organization Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  actorId   String?
+  actorName String
+  action    String // e.g. ORDER_STATUS_CHANGED, PRICE_UPDATED, CUSTOMER_CREATED
+  entity    String
+  entityId  String?
+  detail    String?
+  createdAt DateTime @default(now())
+}
+
+// Email outbox — branded templates are rendered and queued here.
+// SMTP/provider delivery is a configuration step documented in
+// src/lib/server/email.ts; until configured, mail stays QUEUED (never lost).
+model EmailLog {
+  id        String   @id @default(cuid())
+  toEmail   String
+  toName    String   @default("")
+  subject   String
+  bodyHtml  String
+  kind      String   @default("SYSTEM") // ORDER | QUOTATION | DOCUMENT | MESSAGE | SYSTEM
+  status    String   @default("QUEUED") // QUEUED | SENT (once a provider is configured)
+  relatedId String?
+  createdAt DateTime @default(now())
+}

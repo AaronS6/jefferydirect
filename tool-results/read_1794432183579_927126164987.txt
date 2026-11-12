@@ -1,0 +1,850 @@
+     1→"use client";
+     2→
+     3→// Order detail — requested vs confirmed information, items (with per-line
+     4→// specs and attachment references), totals, published progress updates,
+     5→// change requests (including counter proposals), status timeline, documents,
+     6→// CSV export / print, and the canonical reorder flow (current pricing only).
+     7→
+     8→import { useState } from "react";
+     9→import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+    10→import {
+    11→  CalendarClock,
+    12→  Check,
+    13→  ChevronDown,
+    14→  ChevronRight,
+    15→  Download,
+    16→  FilePen,
+    17→  FileText,
+    18→  Loader2,
+    19→  MapPin,
+    20→  MessageSquare,
+    21→  Printer,
+    22→  RefreshCcw,
+    23→  StickyNote,
+    24→  TriangleAlert,
+    25→} from "lucide-react";
+    26→import { Button } from "@/components/ui/button";
+    27→import {
+    28→  AlertDialog,
+    29→  AlertDialogAction,
+    30→  AlertDialogCancel,
+    31→  AlertDialogContent,
+    32→  AlertDialogDescription,
+    33→  AlertDialogFooter,
+    34→  AlertDialogHeader,
+    35→  AlertDialogTitle,
+    36→} from "@/components/ui/alert-dialog";
+    37→import {
+    38→  Dialog,
+    39→  DialogContent,
+    40→  DialogDescription,
+    41→  DialogFooter,
+    42→  DialogHeader,
+    43→  DialogTitle,
+    44→} from "@/components/ui/dialog";
+    45→import {
+    46→  DropdownMenu,
+    47→  DropdownMenuContent,
+    48→  DropdownMenuItem,
+    49→  DropdownMenuTrigger,
+    50→} from "@/components/ui/dropdown-menu";
+    51→import { Separator } from "@/components/ui/separator";
+    52→import { Skeleton } from "@/components/ui/skeleton";
+    53→import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+    54→import { PageHeader } from "@/components/shared/page-header";
+    55→import { Money, MoneyWithCode } from "@/components/shared/money";
+    56→import { StatusBadge, ChangeStatusBadge, OrderSourceBadge } from "@/components/shared/status-badge";
+    57→import { OrderTimeline } from "@/components/shared/order-timeline";
+    58→import { UpdateTimeline } from "@/components/shared/update-timeline";
+    59→import { api, downloadFile } from "@/lib/api-client";
+    60→import { useAppStore, useCartStore } from "@/store/app-store";
+    61→import type { ChangeRequestDto, OrderDetail, ReorderDraft } from "@/types";
+    62→import { toast } from "@/hooks/use-toast";
+    63→import { formatDate, formatDateTime } from "@/lib/date";
+    64→import { ORDER_SOURCE_LABELS, ORDER_TERMINAL_STATUSES, type ChangeKind } from "@/lib/constants";
+    65→import { ErrorAlert, errorMessage, Mono, RowsSkeleton, SectionCard, SummaryItem, Chip } from "./portal-bits";
+    66→import { AttachmentChips, SpecChips } from "./order-builder-bits";
+    67→import { ChangeRequestDialog, changeItemText, type RespondAction } from "./change-request-dialog";
+    68→
+    69→const QUICK_CHANGE_KINDS: { kind: ChangeKind; label: string }[] = [
+    70→  { kind: "QUANTITY", label: "Quantity" },
+    71→  { kind: "SPEC", label: "Specifications" },
+    72→  { kind: "ADD", label: "Add/remove products" },
+    73→  { kind: "ADDRESS", label: "Delivery address" },
+    74→  { kind: "DATE", label: "Delivery date" },
+    75→  { kind: "CANCEL", label: "Cancel order" },
+    76→];
+    77→
+    78→export function OrderDetailView({ orderId }: { orderId: string }) {
+    79→  const back = useAppStore((s) => s.back);
+    80→  const navigate = useAppStore((s) => s.navigate);
+    81→  const loadDraft = useCartStore((s) => s.loadDraft);
+    82→  const queryClient = useQueryClient();
+    83→
+    84→  const [confirmOpen, setConfirmOpen] = useState(false);
+    85→  const [unavailableDraft, setUnavailableDraft] = useState<ReorderDraft | null>(null);
+    86→  const [reorderError, setReorderError] = useState<string | null>(null);
+    87→  const [changeOpen, setChangeOpen] = useState(false);
+    88→  const [changeKind, setChangeKind] = useState<ChangeKind | undefined>(undefined);
+    89→
+    90→  const { data: order, isLoading, error, refetch } = useQuery({
+    91→    queryKey: ["orders", "detail", orderId],
+    92→    queryFn: () => api.get<OrderDetail>(`/api/customer/orders/${orderId}`),
+    93→  });
+    94→
+    95→  const reorderMutation = useMutation({
+    96→    mutationFn: () => api.get<ReorderDraft>(`/api/customer/orders/${orderId}/reorder-data`),
+    97→    onSuccess: (draft) => {
+    98→      if (draft.lines.some((l) => l.unavailable)) {
+    99→        setUnavailableDraft(draft);
+   100→      } else {
+   101→        finishReorder(draft);
+   102→      }
+   103→    },
+   104→    onError: (err) =>
+   105→      setReorderError(err instanceof Error ? err.message : "We could not load reorder data."),
+   106→  });
+   107→
+   108→  const exportMutation = useMutation({
+   109→    mutationFn: (orderNumber: string) =>
+   110→      downloadFile(`/api/customer/orders/${orderId}/export`, `${orderNumber}.csv`),
+   111→    onSuccess: () =>
+   112→      toast({ title: "Order exported", description: "A CSV copy has been downloaded." }),
+   113→    onError: (err) =>
+   114→      toast({
+   115→        title: "Export failed",
+   116→        description: errorMessage(err, "Please try again."),
+   117→        variant: "destructive",
+   118→      }),
+   119→  });
+   120→
+   121→  function finishReorder(draft: ReorderDraft) {
+   122→    const available = draft.lines.filter((l) => !l.unavailable);
+   123→    if (available.length === 0) {
+   124→      setUnavailableDraft(draft);
+   125→      return;
+   126→    }
+   127→    loadDraft(available);
+   128→    queryClient.invalidateQueries({ queryKey: ["orders"] });
+   129→    toast({
+   130→      title: `Items from ${draft.sourceOrderNumber} added to your cart`,
+   131→      description: "Priced at your current effective rates — review quantities and submit when ready.",
+   132→    });
+   133→    navigate("cart");
+   134→  }
+   135→
+   136→  if (error) {
+   137→    return (
+   138→      <div>
+   139→        <PageHeader title="Order" eyebrow="Orders" onBack={back} />
+   140→        <ErrorAlert
+   141→          message={error instanceof Error ? error.message : "We could not load this order."}
+   142→          onRetry={() => refetch()}
+   143→        />
+   144→        <div className="mt-4">
+   145→          <Button variant="outline" onClick={() => navigate("orders")}>
+   146→            Back to orders
+   147→          </Button>
+   148→        </div>
+   149→      </div>
+   150→    );
+   151→  }
+   152→
+   153→  if (isLoading || !order) {
+   154→    return (
+   155→      <div>
+   156→        <PageHeader title="Order" eyebrow="Orders" onBack={back} />
+   157→        <div className="space-y-5">
+   158→          <div className="rounded-lg border bg-card p-4 sm:p-5">
+   159→            <Skeleton className="h-4 w-40" />
+   160→            <div className="mt-3 grid grid-cols-1 gap-x-8 sm:grid-cols-3">
+   161→              {Array.from({ length: 6 }).map((_, i) => (
+   162→                <div key={i} className="py-3">
+   163→                  <Skeleton className="h-3 w-24" />
+   164→                  <Skeleton className="mt-1.5 h-4 w-32" />
+   165→                </div>
+   166→              ))}
+   167→            </div>
+   168→          </div>
+   169→          <div className="rounded-lg border bg-card p-4 sm:p-5">
+   170→            <RowsSkeleton rows={3} />
+   171→          </div>
+   172→        </div>
+   173→      </div>
+   174→    );
+   175→  }
+   176→
+   177→  const taxRateLabel = `${order.taxRateBp / 100}%`;
+   178→  const terminal = ORDER_TERMINAL_STATUSES.includes(order.status);
+   179→  const totalUnits = order.items.reduce((s, i) => s + i.qty, 0);
+   180→
+   181→  function openChangeDialog(kind?: ChangeKind) {
+   182→    setChangeKind(kind);
+   183→    setChangeOpen(true);
+   184→  }
+   185→
+   186→  return (
+   187→    <div>
+   188→      <PageHeader
+   189→        title={order.orderNumber}
+   190→        eyebrow="Order"
+   191→        onBack={back}
+   192→        actions={
+   193→          <>
+   194→            <StatusBadge status={order.status} kind="order" />
+   195→            {!terminal && (
+   196→              <Button
+   197→                className="gap-2 print:hidden"
+   198→                onClick={() => openChangeDialog()}
+   199→                aria-label="Request a change to this order"
+   200→              >
+   201→                <FilePen className="size-4" aria-hidden />
+   202→                <span className="hidden sm:inline">Request a Change</span>
+   203→              </Button>
+   204→            )}
+   205→            <Button
+   206→              variant="outline"
+   207→              className="gap-2 print:hidden"
+   208→              onClick={() => navigate("support")}
+   209→              aria-label="Message our team about this order"
+   210→            >
+   211→              <MessageSquare className="size-4" aria-hidden />
+   212→              <span className="hidden sm:inline">Message</span>
+   213→            </Button>
+   214→            <DropdownMenu>
+   215→              <DropdownMenuTrigger asChild>
+   216→                <Button variant="outline" className="gap-1.5 print:hidden" aria-label="Export this order">
+   217→                  <Download className="size-4" aria-hidden />
+   218→                  <span className="hidden sm:inline">Export</span>
+   219→                  <ChevronDown className="size-3.5" aria-hidden />
+   220→                </Button>
+   221→              </DropdownMenuTrigger>
+   222→              <DropdownMenuContent align="end">
+   223→                <DropdownMenuItem
+   224→                  disabled={exportMutation.isPending}
+   225→                  onClick={() => exportMutation.mutate(order.orderNumber)}
+   226→                >
+   227→                  {exportMutation.isPending ? (
+   228→                    <Loader2 className="size-4 animate-spin" aria-hidden />
+   229→                  ) : (
+   230→                    <Download className="size-4" aria-hidden />
+   231→                  )}
+   232→                  Download CSV
+   233→                </DropdownMenuItem>
+   234→                <DropdownMenuItem onClick={() => window.print()}>
+   235→                  <Printer className="size-4" aria-hidden />
+   236→                  Print order
+   237→                </DropdownMenuItem>
+   238→              </DropdownMenuContent>
+   239→            </DropdownMenu>
+   240→            {order.items.length > 0 && (
+   241→              <Button
+   242→                className="gap-2 print:hidden"
+   243→                onClick={() => {
+   244→                  setReorderError(null);
+   245→                  setConfirmOpen(true);
+   246→                }}
+   247→              >
+   248→                <RefreshCcw className="size-4" aria-hidden />
+   249→                <span className="hidden sm:inline">Reorder</span>
+   250→              </Button>
+   251→            )}
+   252→          </>
+   253→        }
+   254→      />
+   255→
+   256→      <div className="space-y-5">
+   257→        {/* Next expected update — only when the team committed to one */}
+   258→        {order.nextUpdateDate && !terminal && (
+   259→          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border bg-card px-4 py-3 shadow-[0_1px_2px_rgb(0_0_0_/_0.04)] print:shadow-none">
+   260→            <CalendarClock className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+   261→            <div className="min-w-0 flex-1">
+   262→              <p className="text-[11px] font-medium uppercase tracking-[0.06em] text-muted-foreground">
+   263→                Next expected update
+   264→              </p>
+   265→              <p className="mt-0.5 text-[13px] leading-relaxed text-foreground">
+   266→                Jeffery Group expects to provide another update regarding this order by{" "}
+   267→                <span className="tnum font-medium">{formatDate(order.nextUpdateDate)}</span>.
+   268→              </p>
+   269→            </div>
+   270→          </div>
+   271→        )}
+   272→
+   273→        {/* ── Summary grid ── */}
+   274→        <SectionCard
+   275→          title="Order details"
+   276→          description="Details you submitted are marked “requested”. Confirmed dates are set by Jeffery Group."
+   277→        >
+   278→          <dl className="m-0 grid grid-cols-1 gap-x-8 sm:grid-cols-2 lg:grid-cols-3">
+   279→            <SummaryItem label="Submitted">{formatDate(order.createdAt)}</SummaryItem>
+   280→            <SummaryItem label="Submitted by">{order.submittedBy}</SummaryItem>
+   281→            {order.poNumber && <SummaryItem label="PO reference">{order.poNumber}</SummaryItem>}
+   282→            {order.requestedDelivery && (
+   283→              <SummaryItem label="Requested delivery (your request)">{order.requestedDelivery}</SummaryItem>
+   284→            )}
+   285→            {order.requestedDeliveryDate && (
+   286→              <SummaryItem label="Requested delivery (your request)">
+   287→                {formatDate(order.requestedDeliveryDate)}
+   288→                <span className="block text-[11.5px] text-muted-foreground">
+   289→                  Requested, not guaranteed — Jeffery Group confirms the actual date.
+   290→                </span>
+   291→              </SummaryItem>
+   292→            )}
+   293→            {order.estimatedDispatch && (
+   294→              <SummaryItem label="Estimated dispatch">{formatDate(order.estimatedDispatch)}</SummaryItem>
+   295→            )}
+   296→            {order.estimatedDelivery && (
+   297→              <SummaryItem label="Estimated delivery (confirmed by Jeffery Group)">
+   298→                {formatDate(order.estimatedDelivery)}
+   299→              </SummaryItem>
+   300→            )}
+   301→            {order.revisedDeliveryDate && (
+   302→              <SummaryItem label="Revised delivery estimate">
+   303→                <span className="font-medium text-amber-700">{formatDate(order.revisedDeliveryDate)}</span>
+   304→              </SummaryItem>
+   305→            )}
+   306→            {order.actualDeliveryDate && (
+   307→              <SummaryItem label="Delivered on">{formatDate(order.actualDeliveryDate)}</SummaryItem>
+   308→            )}
+   309→            {order.trackingNumber && (
+   310→              <SummaryItem label="Tracking number">
+   311→                <Mono className="text-[13px]">{order.trackingNumber}</Mono>
+   312→              </SummaryItem>
+   313→            )}
+   314→            {order.sourceType !== "PORTAL" && (
+   315→              <SummaryItem label="Order source">
+   316→                <span className="flex flex-wrap items-center gap-2">
+   317→                  <OrderSourceBadge source={order.sourceType} />
+   318→                  <span className="text-[12.5px] leading-relaxed text-muted-foreground">
+   319→                    {ORDER_SOURCE_LABELS[order.sourceType] ?? order.sourceType}
+   320→                    {order.recordedByName ? ` · recorded by ${order.recordedByName}` : ""} — your company
+   321→                    placed this order outside ClientHub; we recorded it so you can track it here.
+   322→                  </span>
+   323→                </span>
+   324→              </SummaryItem>
+   325→            )}
+   326→            {order.reorderSource && (
+   327→              <SummaryItem label="Reorder source">Reorder of {order.reorderSource}</SummaryItem>
+   328→            )}
+   329→          </dl>
+   330→        </SectionCard>
+   331→
+   332→        <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
+   333→          {/* ── Main column ── */}
+   334→          <div className="min-w-0 space-y-5">
+   335→            {/* Items */}
+   336→            <SectionCard
+   337→              title="Items"
+   338→              description={`${order.items.length} line${order.items.length === 1 ? "" : "s"} · ${totalUnits.toLocaleString()} units`}
+   339→              contentClassName="p-0 sm:p-0"
+   340→              className="print:break-inside-avoid"
+   341→            >
+   342→              {/* Desktop table */}
+   343→              <div className="hidden md:block">
+   344→                <Table>
+   345→                  <TableHeader>
+   346→                    <TableRow className="hover:bg-transparent">
+   347→                      <TableHead>Product</TableHead>
+   348→                      <TableHead className="text-right">Qty</TableHead>
+   349→                      <TableHead className="text-right">Unit price</TableHead>
+   350→                      <TableHead className="text-right">Line total</TableHead>
+   351→                    </TableRow>
+   352→                  </TableHeader>
+   353→                  <TableBody>
+   354→                    {order.items.map((item) => (
+   355→                      <TableRow key={item.id}>
+   356→                        <TableCell>
+   357→                          <ItemIdentity item={item} navigate={navigate} />
+   358→                          {item.note && (
+   359→                            <span className="mt-0.5 block text-[12px] text-muted-foreground">{item.note}</span>
+   360→                          )}
+   361→                          <SpecChips specs={item.specs} />
+   362→                          <AttachmentChips attachments={item.attachments} />
+   363→                        </TableCell>
+   364→                        <TableCell className="tnum text-right text-[13px]">{item.qty.toLocaleString()}</TableCell>
+   365→                        <TableCell className="text-right">
+   366→                          {item.productId ? (
+   367→                            <Money cents={item.unitPriceCents} />
+   368→                          ) : (
+   369→                            <span className="text-[12.5px] text-muted-foreground">Pricing to be confirmed</span>
+   370→                          )}
+   371→                        </TableCell>
+   372→                        <TableCell className="text-right">
+   373→                          {item.productId ? (
+   374→                            <Money cents={item.lineTotalCents} className="font-medium" />
+   375→                          ) : (
+   376→                            <span className="text-[12.5px] text-muted-foreground">—</span>
+   377→                          )}
+   378→                        </TableCell>
+   379→                      </TableRow>
+   380→                    ))}
+   381→                  </TableBody>
+   382→                </Table>
+   383→              </div>
+   384→              {/* Mobile stacked */}
+   385→              <ul className="divide-y md:hidden">
+   386→                {order.items.map((item) => (
+   387→                  <li key={item.id} className="px-4 py-3.5 sm:px-5">
+   388→                    <div className="flex items-start justify-between gap-3">
+   389→                      <div className="min-w-0">
+   390→                        <ItemIdentity item={item} navigate={navigate} />
+   391→                        {item.note && (
+   392→                          <span className="mt-0.5 block text-[12px] text-muted-foreground">{item.note}</span>
+   393→                        )}
+   394→                        <SpecChips specs={item.specs} />
+   395→                        <AttachmentChips attachments={item.attachments} />
+   396→                      </div>
+   397→                      <div className="shrink-0 text-right">
+   398→                        {item.productId ? (
+   399→                          <>
+   400→                            <Money cents={item.lineTotalCents} className="text-[13.5px] font-medium" />
+   401→                            <p className="text-[11.5px] text-muted-foreground">
+   402→                              <span className="tnum">{item.qty.toLocaleString()}</span> ×{" "}
+   403→                              <Money cents={item.unitPriceCents} muted />
+   404→                            </p>
+   405→                          </>
+   406→                        ) : (
+   407→                          <>
+   408→                            <span className="text-[12.5px] text-muted-foreground">Pricing to be confirmed</span>
+   409→                            <p className="text-[11.5px] text-muted-foreground">
+   410→                              <span className="tnum">{item.qty.toLocaleString()}</span> units
+   411→                            </p>
+   412→                          </>
+   413→                        )}
+   414→                      </div>
+   415→                    </div>
+   416→                  </li>
+   417→                ))}
+   418→              </ul>
+   419→            </SectionCard>
+   420→
+   421→            {/* Totals */}
+   422→            <SectionCard title="Totals" className="print:break-inside-avoid">
+   423→              <div className="ml-auto w-full max-w-xs space-y-1.5">
+   424→                <div className="flex items-baseline justify-between text-[13px]">
+   425→                  <span className="text-muted-foreground">Subtotal</span>
+   426→                  <MoneyWithCode cents={order.subtotalCents} />
+   427→                </div>
+   428→                <div className="flex items-baseline justify-between text-[13px]">
+   429→                  <span className="text-muted-foreground">GST ({taxRateLabel})</span>
+   430→                  <MoneyWithCode cents={order.taxCents} />
+   431→                </div>
+   432→                <Separator className="my-2" />
+   433→                <div className="flex items-baseline justify-between">
+   434→                  <span className="text-[13.5px] font-medium">Total</span>
+   435→                  <MoneyWithCode cents={order.totalCents} className="text-[15px] font-semibold" />
+   436→                </div>
+   437→              </div>
+   438→              <p className="mt-3 text-right text-[11.5px] text-muted-foreground">
+   439→                Taxes computed at the confirmed rate of {taxRateLabel}, in Canadian dollars.
+   440→                {order.items.some((i) => !i.productId) && " Custom requests are quoted separately."}
+   441→              </p>
+   442→            </SectionCard>
+   443→
+   444→            {/* Progress updates */}
+   445→            <SectionCard
+   446→              title="Order updates"
+   447→              description="Progress updates published by the Jeffery Group team, newest first."
+   448→              className="print:break-inside-avoid"
+   449→            >
+   450→              <UpdateTimeline updates={order.updates} />
+   451→            </SectionCard>
+   452→
+   453→            {/* Change requests */}
+   454→            {order.changeRequests.length > 0 && (
+   455→              <ChangeRequestsCard orderId={orderId} requests={order.changeRequests} />
+   456→            )}
+   457→
+   458→            {/* Timeline */}
+   459→            <SectionCard title="Status timeline" description="Each update is recorded by the Jeffery Group team.">
+   460→              <OrderTimeline status={order.status} history={order.history} />
+   461→            </SectionCard>
+   462→          </div>
+   463→
+   464→          {/* ── Side rail ── */}
+   465→          <aside className="space-y-5" aria-label="Shipping and documents">
+   466→            <SectionCard title="Shipping" className="print:break-inside-avoid">
+   467→              <div className="flex items-start gap-2.5">
+   468→                <MapPin className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+   469→                <p className="text-[13.5px] leading-relaxed text-foreground">{order.shippingText}</p>
+   470→              </div>
+   471→              {order.notes && (
+   472→                <>
+   473→                  <Separator className="my-4" />
+   474→                  <div className="flex items-start gap-2.5">
+   475→                    <StickyNote className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden />
+   476→                    <div>
+   477→                      <p className="text-[11.5px] font-medium uppercase tracking-[0.06em] text-muted-foreground">
+   478→                        Notes
+   479→                      </p>
+   480→                      <p className="mt-1 whitespace-pre-line text-[13px] leading-relaxed text-foreground">
+   481→                        {order.notes}
+   482→                      </p>
+   483→                    </div>
+   484→                  </div>
+   485→                </>
+   486→              )}
+   487→            </SectionCard>
+   488→
+   489→            {!terminal && (
+   490→              <SectionCard
+   491→                title="Request a change"
+   492→                description="Changes are requests — your order stays unchanged until Jeffery Group approves them."
+   493→                className="print:hidden"
+   494→              >
+   495→                <ul className="space-y-1">
+   496→                  {QUICK_CHANGE_KINDS.map((q) => (
+   497→                    <li key={q.kind}>
+   498→                      <button
+   499→                        type="button"
+   500→                        onClick={() => openChangeDialog(q.kind)}
+   501→                        className="flex w-full items-center justify-between gap-2 rounded-md border bg-muted/20 px-3 py-2 text-left text-[12.5px] font-medium text-foreground transition-colors hover:border-primary/30 hover:bg-muted/40"
+   502→                      >
+   503→                        {q.label}
+   504→                        <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+   505→                      </button>
+   506→                    </li>
+   507→                  ))}
+   508→                </ul>
+   509→              </SectionCard>
+   510→            )}
+   511→
+   512→            {order.documents.length > 0 && (
+   513→              <SectionCard title="Related documents" className="print:break-inside-avoid">
+   514→                <ul className="space-y-2">
+   515→                  {order.documents.map((doc) => (
+   516→                    <li key={doc.id}>
+   517→                      <button
+   518→                        onClick={() => navigate("documents")}
+   519→                        className="flex w-full items-center gap-2.5 rounded-md border bg-muted/30 px-3 py-2.5 text-left text-[12.5px] transition-colors hover:border-primary/25 hover:bg-muted/60"
+   520→                      >
+   521→                        <FileText className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+   522→                        <span className="min-w-0 flex-1 truncate font-medium text-foreground">{doc.title}</span>
+   523→                        <span className="shrink-0 text-[11px] text-muted-foreground">{doc.sizeLabel}</span>
+   524→                      </button>
+   525→                    </li>
+   526→                  ))}
+   527→                </ul>
+   528→              </SectionCard>
+   529→            )}
+   530→          </aside>
+   531→        </div>
+   532→      </div>
+   533→
+   534→      {/* Change request dialog */}
+   535→      <ChangeRequestDialog
+   536→        open={changeOpen}
+   537→        onOpenChange={setChangeOpen}
+   538→        orderId={orderId}
+   539→        items={order.items.map((i) => ({ productId: i.productId, name: i.name, sku: i.sku, qty: i.qty }))}
+   540→        initialKind={changeKind}
+   541→      />
+   542→
+   543→      {/* Reorder confirm */}
+   544→      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+   545→        <AlertDialogContent>
+   546→          <AlertDialogHeader>
+   547→            <AlertDialogTitle>Reorder {order.orderNumber}?</AlertDialogTitle>
+   548→            <AlertDialogDescription asChild>
+   549→              <div className="space-y-2">
+   550→                <p>
+   551→                  We&apos;ll load the items into your cart at your <strong>current</strong> effective pricing —
+   552→                  historical prices are never reused. Quantities start at your last order; adjust them before
+   553→                  submitting.
+   554→                </p>
+   555→                <p>Any items currently in your cart will be replaced.</p>
+   556→              </div>
+   557→            </AlertDialogDescription>
+   558→          </AlertDialogHeader>
+   559→          {reorderError && (
+   560→            <div
+   561→              role="alert"
+   562→              className="rounded-md border border-red-200 bg-red-50 px-3.5 py-2.5 text-[13px] text-red-700"
+   563→            >
+   564→              {reorderError}
+   565→            </div>
+   566→          )}
+   567→          <AlertDialogFooter>
+   568→            <AlertDialogCancel>Cancel</AlertDialogCancel>
+   569→            <AlertDialogAction
+   570→              onClick={() => {
+   571→                setConfirmOpen(false);
+   572→                reorderMutation.mutate();
+   573→              }}
+   574→            >
+   575→              {reorderMutation.isPending ? (
+   576→                <Loader2 className="size-4 animate-spin" aria-hidden />
+   577→              ) : (
+   578→                <RefreshCcw className="size-4" aria-hidden />
+   579→              )}
+   580→              Load items
+   581→            </AlertDialogAction>
+   582→          </AlertDialogFooter>
+   583→        </AlertDialogContent>
+   584→      </AlertDialog>
+   585→
+   586→      {/* Unavailable items notice */}
+   587→      <Dialog open={unavailableDraft !== null} onOpenChange={(o) => !o && setUnavailableDraft(null)}>
+   588→        <DialogContent className="sm:max-w-[520px]">
+   589→          <DialogHeader>
+   590→            <DialogTitle className="flex items-center gap-2">
+   591→              <TriangleAlert className="size-4.5 text-amber-600" aria-hidden />
+   592→              Some items are no longer available
+   593→            </DialogTitle>
+   594→            <DialogDescription>
+   595→              The following products from {unavailableDraft?.sourceOrderNumber} are inactive or no longer
+   596→              approved for your account — they can&apos;t be reordered. Available items will be loaded if you
+   597→              continue.
+   598→            </DialogDescription>
+   599→          </DialogHeader>
+   600→          <ul className="max-h-56 overflow-y-auto rounded-md border divide-y">
+   601→            {(unavailableDraft?.lines ?? [])
+   602→              .filter((l) => l.unavailable)
+   603→              .map((l) => (
+   604→                <li key={l.productId} className="flex items-center justify-between gap-3 px-3.5 py-2.5 text-[13px]">
+   605→                  <span className="min-w-0">
+   606→                    <span className="block truncate font-medium">{l.name}</span>
+   607→                    <Mono className="text-muted-foreground">{l.sku}</Mono>
+   608→                  </span>
+   609→                  <span className="tnum shrink-0 text-[12px] text-muted-foreground">
+   610→                    qty {l.qty.toLocaleString()}
+   611→                  </span>
+   612→                </li>
+   613→              ))}
+   614→          </ul>
+   615→          <DialogFooter className="gap-2">
+   616→            <Button variant="outline" onClick={() => setUnavailableDraft(null)}>
+   617→              Cancel reorder
+   618→            </Button>
+   619→            <Button
+   620→              disabled={(unavailableDraft?.lines ?? []).every((l) => l.unavailable)}
+   621→              onClick={() => {
+   622→                if (unavailableDraft) finishReorder(unavailableDraft);
+   623→                setUnavailableDraft(null);
+   624→              }}
+   625→            >
+   626→              <Check className="size-4" aria-hidden />
+   627→              Continue with available items
+   628→            </Button>
+   629→          </DialogFooter>
+   630→        </DialogContent>
+   631→      </Dialog>
+   632→    </div>
+   633→  );
+   634→}
+   635→
+   636→// ─── Items identity (catalogue link vs custom request) ──────────────────────
+   637→
+   638→function ItemIdentity({
+   639→  item,
+   640→  navigate,
+   641→}: {
+   642→  item: { productId: string | null; name: string; sku: string };
+   643→  navigate: ReturnType<typeof useAppStore.getState>["navigate"];
+   644→}) {
+   645→  if (item.productId) {
+   646→    return (
+   647→      <button
+   648→        className="text-left text-[13px] font-medium underline-offset-2 transition-colors hover:text-primary hover:underline"
+   649→        onClick={() => navigate("product-detail", { id: item.productId ?? "" })}
+   650→      >
+   651→        {item.name}
+   652→        <Mono className="ml-2 block text-muted-foreground">{item.sku}</Mono>
+   653→      </button>
+   654→    );
+   655→  }
+   656→  return (
+   657→    <span className="text-[13px] font-medium">
+   658→      <span className="flex flex-wrap items-center gap-1.5">
+   659→        {item.name}
+   660→        <Chip>Custom request</Chip>
+   661→      </span>
+   662→      <Mono className="mt-0.5 block text-muted-foreground">{item.sku || "custom"}</Mono>
+   663→    </span>
+   664→  );
+   665→}
+   666→
+   667→// ─── Change requests card ────────────────────────────────────────────────────
+   668→
+   669→function ChangeRequestsCard({
+   670→  orderId,
+   671→  requests,
+   672→}: {
+   673→  orderId: string;
+   674→  requests: ChangeRequestDto[];
+   675→}) {
+   676→  const queryClient = useQueryClient();
+   677→
+   678→  const respondMutation = useMutation({
+   679→    mutationFn: (vars: { id: string; action: RespondAction }) =>
+   680→      api.post<ChangeRequestDto>(`/api/customer/change-requests/${vars.id}/respond`, {
+   681→        action: vars.action,
+   682→      }),
+   683→    onSuccess: (_cr, vars) => {
+   684→      queryClient.invalidateQueries({ queryKey: ["orders"] });
+   685→      queryClient.invalidateQueries({ queryKey: ["orders", "detail", orderId] });
+   686→      queryClient.invalidateQueries({ queryKey: ["customer-dashboard"] });
+   687→      queryClient.invalidateQueries({ queryKey: ["notifications"] });
+   688→      if (vars.action === "ACCEPT") {
+   689→        toast({
+   690→          title: "Proposal accepted",
+   691→          description: "Jeffery Group will apply it to your order — you'll see the change reflected here.",
+   692→        });
+   693→      } else if (vars.action === "DECLINE") {
+   694→        toast({
+   695→          title: "Proposal declined",
+   696→          description: "The original order remains unchanged.",
+   697→        });
+   698→      } else {
+   699→        toast({
+   700→          title: "Request withdrawn",
+   701→          description: "Your order continues exactly as it was.",
+   702→        });
+   703→      }
+   704→    },
+   705→    onError: (err) =>
+   706→      toast({
+   707→        title: "We could not record your response",
+   708→        description: errorMessage(err, "Please try again."),
+   709→        variant: "destructive",
+   710→      }),
+   711→  });
+   712→
+   713→  // Newest-first from the API — render chronologically for the narrative.
+   714→  const chronological = [...requests].reverse();
+   715→
+   716→  return (
+   717→    <SectionCard
+   718→      title="Change requests"
+   719→      description="Requests from your team on this order — nothing changes until Jeffery Group approves them."
+   720→      className="print:break-inside-avoid"
+   721→    >
+   722→      <div className="space-y-3">
+   723→        {chronological.map((cr) => (
+   724→          <ChangeRequestEntry
+   725→            key={cr.id}
+   726→            cr={cr}
+   727→            busy={respondMutation.isPending}
+   728→            onRespond={(id, action) => respondMutation.mutate({ id, action })}
+   729→          />
+   730→        ))}
+   731→      </div>
+   732→    </SectionCard>
+   733→  );
+   734→}
+   735→
+   736→function ChangeRequestEntry({
+   737→  cr,
+   738→  busy,
+   739→  onRespond,
+   740→}: {
+   741→  cr: ChangeRequestDto;
+   742→  busy: boolean;
+   743→  onRespond: (id: string, action: RespondAction) => void;
+   744→}) {
+   745→  return (
+   746→    <article className="rounded-lg border p-4 sm:p-5">
+   747→      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-2">
+   748→        <ChangeStatusBadge status={cr.status} />
+   749→        <span className="text-[13px] text-foreground">requested by {cr.requestedByName}</span>
+   750→        <span className="ml-auto tnum text-[11.5px] text-muted-foreground">{formatDateTime(cr.createdAt)}</span>
+   751→      </div>
+   752→
+   753→      <ul className="mt-2.5 space-y-1">
+   754→        {cr.changes.map((c, i) => (
+   755→          <li key={i} className="text-[13px] leading-relaxed text-foreground/90">
+   756→            {changeItemText(c)}
+   757→          </li>
+   758→        ))}
+   759→      </ul>
+   760→
+   761→      {cr.requestNote && (
+   762→        <p className="mt-2 whitespace-pre-line text-[12.5px] leading-relaxed text-muted-foreground">
+   763→          <span className="font-medium text-muted-foreground/80">Your note: </span>
+   764→          {cr.requestNote}
+   765→        </p>
+   766→      )}
+   767→
+   768→      {cr.status === "PENDING" && (
+   769→        <div className="mt-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 rounded-md border bg-muted/30 px-3.5 py-2.5">
+   770→          <p className="max-w-md text-[12.5px] leading-relaxed text-muted-foreground">
+   771→            Your order stays unchanged until Jeffery Group approves this request.
+   772→          </p>
+   773→          <Button
+   774→            variant="ghost"
+   775→            size="sm"
+   776→            className="h-7 px-2.5 text-[12px] text-muted-foreground hover:text-foreground"
+   777→            disabled={busy}
+   778→            onClick={() => onRespond(cr.id, "WITHDRAW")}
+   779→          >
+   780→            Withdraw request
+   781→          </Button>
+   782→        </div>
+   783→      )}
+   784→
+   785→      {(cr.status === "ACCEPTED" || cr.status === "DECLINED" || cr.status === "WITHDRAWN") &&
+   786→        (cr.adminName || cr.decidedAt) && (
+   787→          <div className="mt-3 rounded-md border bg-muted/30 px-3.5 py-2.5 text-[12.5px] leading-relaxed">
+   788→            <p className="font-medium text-foreground">
+   789→              {cr.status === "ACCEPTED" ? "Approved" : cr.status === "DECLINED" ? "Declined" : "Withdrawn"}
+   790→              {cr.adminName ? ` by ${cr.adminName}` : ""}
+   791→              {cr.decidedAt ? ` · ${formatDateTime(cr.decidedAt)}` : ""}
+   792→            </p>
+   793→            {cr.decisionNote && <p className="mt-0.5 text-muted-foreground">{cr.decisionNote}</p>}
+   794→            {cr.appliedAt && cr.status === "ACCEPTED" && (
+   795→              <p className="mt-0.5 text-muted-foreground">Applied to your order {formatDateTime(cr.appliedAt)}.</p>
+   796→            )}
+   797→          </div>
+   798→        )}
+   799→
+   800→      {cr.status === "COUNTERED" && (
+   801→        <div className="mt-3 rounded-lg border border-sky-200/80 bg-sky-50/50 p-3.5">
+   802→          <p className="text-[12px] font-medium uppercase tracking-[0.06em] text-sky-700">
+   803→            Jeffery Group proposed an alternative
+   804→          </p>
+   805→          {cr.counter && (
+   806→            <ul className="mt-1.5 space-y-1">
+   807→              {cr.counter.map((c, i) => (
+   808→                <li key={i} className="text-[13px] leading-relaxed text-foreground/90">
+   809→                  {changeItemText(c)}
+   810→                </li>
+   811→              ))}
+   812→            </ul>
+   813→          )}
+   814→          {cr.counterNote && (
+   815→            <p className="mt-1.5 whitespace-pre-line text-[12.5px] leading-relaxed text-muted-foreground">
+   816→              {cr.counterNote}
+   817→            </p>
+   818→          )}
+   819→          {cr.counterDecision ? (
+   820→            <p className="mt-2 text-[12.5px] leading-relaxed text-muted-foreground">
+   821→              You {cr.counterDecision === "ACCEPT" ? "accepted" : "declined"} this proposal
+   822→              {cr.counterDecidedAt ? ` on ${formatDateTime(cr.counterDecidedAt)}` : ""}.
+   823→            </p>
+   824→          ) : (
+   825→            <div className="mt-2.5 flex flex-wrap items-center gap-2">
+   826→              <Button
+   827→                size="sm"
+   828→                className="h-8 gap-1.5"
+   829→                disabled={busy}
+   830→                onClick={() => onRespond(cr.id, "ACCEPT")}
+   831→              >
+   832→                <Check className="size-3.5" aria-hidden /> Accept proposal
+   833→              </Button>
+   834→              <Button
+   835→                variant="outline"
+   836→                size="sm"
+   837→                className="h-8 gap-1.5"
+   838→                disabled={busy}
+   839→                onClick={() => onRespond(cr.id, "DECLINE")}
+   840→              >
+   841→                Decline
+   842→              </Button>
+   843→            </div>
+   844→          )}
+   845→        </div>
+   846→      )}
+   847→    </article>
+   848→  );
+   849→}
+   850→

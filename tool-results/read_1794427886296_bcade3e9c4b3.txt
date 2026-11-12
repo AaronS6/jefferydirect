@@ -1,0 +1,830 @@
+     1→"use client";
+     2→
+     3→// Administration — customer profile: overview, contacts & addresses, product
+     4→// pricing matrix, orders, quotations, documents and internal notes.
+     5→
+     6→import { useState } from "react";
+     7→import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+     8→import {
+     9→  Ban,
+    10→  Building2,
+    11→  CheckCircle2,
+    12→  FileText,
+    13→  FolderOpen,
+    14→  MapPin,
+    15→  PencilLine,
+    16→  Plus,
+    17→  ReceiptText,
+    18→  Save,
+    19→  UserPlus,
+    20→  Users,
+    21→} from "lucide-react";
+    22→import { Button } from "@/components/ui/button";
+    23→import { Input } from "@/components/ui/input";
+    24→import { Label } from "@/components/ui/label";
+    25→import { Textarea } from "@/components/ui/textarea";
+    26→import { Switch } from "@/components/ui/switch";
+    27→import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+    28→import {
+    29→  AlertDialog,
+    30→  AlertDialogAction,
+    31→  AlertDialogCancel,
+    32→  AlertDialogContent,
+    33→  AlertDialogDescription,
+    34→  AlertDialogFooter,
+    35→  AlertDialogHeader,
+    36→  AlertDialogTitle,
+    37→} from "@/components/ui/alert-dialog";
+    38→import {
+    39→  Dialog,
+    40→  DialogContent,
+    41→  DialogDescription,
+    42→  DialogFooter,
+    43→  DialogHeader,
+    44→  DialogTitle,
+    45→} from "@/components/ui/dialog";
+    46→import { Table, TableBody, TableHeader, TableRow } from "@/components/ui/table";
+    47→import { PageHeader } from "@/components/shared/page-header";
+    48→import { OrgStatusBadge, StatusBadge, UserStatusBadge, DocumentCategoryBadge } from "@/components/shared/status-badge";
+    49→import { Money } from "@/components/shared/money";
+    50→import { KpiCard } from "@/components/shared/kpi-card";
+    51→import { EmptyState } from "@/components/shared/empty-state";
+    52→import { PricingMatrix } from "./pricing-matrix";
+    53→import { api } from "@/lib/api-client";
+    54→import { formatDate, timeAgo } from "@/lib/date";
+    55→import { useAppStore } from "@/store/app-store";
+    56→import { toast } from "@/hooks/use-toast";
+    57→import type { CustomerProfile } from "@/types";
+    58→import { DefRow, GroupLabel, InlineError, RowsSkeleton, SectionCard, Td, Th, TempPasswordPanel, dashed } from "./admin-ui";
+    59→
+    60→export function AdminCustomerDetailView({ customerId }: { customerId: string }) {
+    61→  const back = useAppStore((s) => s.back);
+    62→  const navigate = useAppStore((s) => s.navigate);
+    63→  const queryClient = useQueryClient();
+    64→  const [editOpen, setEditOpen] = useState(false);
+    65→  const [inviteOpen, setInviteOpen] = useState(false);
+    66→  const [suspendOpen, setSuspendOpen] = useState(false);
+    67→
+    68→  const { data: profile, isLoading, isError, error } = useQuery({
+    69→    queryKey: ["admin", "customer", customerId],
+    70→    queryFn: () => api.get<CustomerProfile>(`/api/admin/customers/${customerId}`),
+    71→  });
+    72→
+    73→  function invalidate() {
+    74→    queryClient.invalidateQueries({ queryKey: ["admin", "customer", customerId] });
+    75→    queryClient.invalidateQueries({ queryKey: ["admin", "customers"] });
+    76→    queryClient.invalidateQueries({ queryKey: ["admin", "overview"] });
+    77→  }
+    78→
+    79→  const statusMutation = useMutation({
+    80→    mutationFn: (status: "ACTIVE" | "SUSPENDED") =>
+    81→      api.put<{ ok: boolean }>(`/api/admin/customers/${customerId}`, { status }),
+    82→    onSuccess: (_res, status) => {
+    83→      invalidate();
+    84→      setSuspendOpen(false);
+    85→      toast({
+    86→        title: status === "SUSPENDED" ? "Customer suspended" : "Customer reactivated",
+    87→        description:
+    88→          status === "SUSPENDED"
+    89→            ? "Their users can no longer sign in. Historical orders and documents are preserved."
+    90→            : "Their users can sign in and place orders again.",
+    91→      });
+    92→    },
+    93→    onError: (err: Error) => toast({ title: "Could not change account status.", description: err.message }),
+    94→  });
+    95→
+    96→  if (isError) {
+    97→    return (
+    98→      <div>
+    99→        <PageHeader title="Customer" onBack={back} eyebrow="Customer profile" />
+   100→        <InlineError message={error instanceof Error ? error.message : "Could not load this customer."} />
+   101→      </div>
+   102→    );
+   103→  }
+   104→
+   105→  if (isLoading || !profile) {
+   106→    return (
+   107→      <div>
+   108→        <PageHeader title="Customer" onBack={back} eyebrow="Customer profile" description="Loading profile…" />
+   109→        <SectionCard>
+   110→          <RowsSkeleton rows={6} />
+   111→        </SectionCard>
+   112→      </div>
+   113→    );
+   114→  }
+   115→
+   116→  const { organization: org, users, addresses, orders, quotations, documents, approvedProductCount } = profile;
+   117→  const suspended = org.status === "SUSPENDED";
+   118→
+   119→  return (
+   120→    <div>
+   121→      <PageHeader
+   122→        eyebrow={
+   123→          <span className="font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+   124→            {org.code}
+   125→          </span>
+   126→        }
+   127→        title={org.name}
+   128→        onBack={back}
+   129→        description={
+   130→          <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+   131→            <span>Customer since {formatDate(org.createdAt)}</span>
+   132→            <span className="text-muted-foreground/50">·</span>
+   133→            <span>{users.length} portal {users.length === 1 ? "user" : "users"}</span>
+   134→            <span className="text-muted-foreground/50">·</span>
+   135→            <span>{org.billingCity ? `${org.billingCity}, ${org.billingProvince}` : "Billing address incomplete"}</span>
+   136→          </span>
+   137→        }
+   138→        actions={
+   139→          <div className="flex flex-wrap items-center gap-2">
+   140→            <Button variant="outline" size="sm" className="h-8 gap-1.5 text-[12.5px]" onClick={() => setEditOpen(true)}>
+   141→              <PencilLine className="size-3.5" aria-hidden /> Edit info
+   142→            </Button>
+   143→            <Button variant="outline" size="sm" className="h-8 gap-1.5 text-[12.5px]" onClick={() => setInviteOpen(true)}>
+   144→              <UserPlus className="size-3.5" aria-hidden /> Invite user
+   145→            </Button>
+   146→            {suspended ? (
+   147→              <Button
+   148→                variant="outline"
+   149→                size="sm"
+   150→                className="h-8 gap-1.5 text-[12.5px] text-emerald-700"
+   151→                disabled={statusMutation.isPending}
+   152→                onClick={() => statusMutation.mutate("ACTIVE")}
+   153→              >
+   154→                <CheckCircle2 className="size-3.5" aria-hidden /> Reactivate
+   155→              </Button>
+   156→            ) : (
+   157→              <Button variant="outline" size="sm" className="h-8 gap-1.5 text-[12.5px] text-red-700 hover:bg-red-50" onClick={() => setSuspendOpen(true)}>
+   158→                <Ban className="size-3.5" aria-hidden /> Suspend
+   159→              </Button>
+   160→            )}
+   161→            <OrgStatusBadge status={org.status} />
+   162→          </div>
+   163→        }
+   164→      />
+   165→
+   166→      <Tabs defaultValue="overview" className="gap-5">
+   167→        <TabsList className="h-auto max-w-full flex-wrap gap-1 sm:flex-nowrap sm:overflow-x-auto">
+   168→          <TabsTrigger value="overview" className="px-3 py-1.5 text-[12.5px]">Overview</TabsTrigger>
+   169→          <TabsTrigger value="contacts" className="px-3 py-1.5 text-[12.5px]">Contacts &amp; addresses</TabsTrigger>
+   170→          <TabsTrigger value="pricing" className="px-3 py-1.5 text-[12.5px]">Products &amp; pricing</TabsTrigger>
+   171→          <TabsTrigger value="orders" className="px-3 py-1.5 text-[12.5px]">Orders</TabsTrigger>
+   172→          <TabsTrigger value="quotes" className="px-3 py-1.5 text-[12.5px]">Quotations</TabsTrigger>
+   173→          <TabsTrigger value="documents" className="px-3 py-1.5 text-[12.5px]">Documents</TabsTrigger>
+   174→          <TabsTrigger value="internal" className="px-3 py-1.5 text-[12.5px]">Internal</TabsTrigger>
+   175→        </TabsList>
+   176→
+   177→        {/* Overview */}
+   178→        <TabsContent value="overview" className="space-y-4 sm:space-y-6">
+   179→          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+   180→            <KpiCard icon={ReceiptText} label="Orders" value={orders.length} hint="All time" />
+   181→            <KpiCard icon={FileText} label="Quotations" value={quotations.length} hint="Requests + issued" />
+   182→            <KpiCard icon={Building2} label="Approved products" value={approvedProductCount} hint="In their catalogue" />
+   183→            <KpiCard icon={FolderOpen} label="Documents" value={documents.length} hint="Shared with them" />
+   184→          </div>
+   185→
+   186→          <div className="grid gap-4 sm:gap-6 lg:grid-cols-2">
+   187→            <SectionCard title="Billing account" description="Managed by Jeffery Group — visible on customer invoices">
+   188→              <dl>
+   189→                <DefRow label="Business" value={org.name} />
+   190→                <DefRow label="Customer code" value={<span className="font-mono text-[12.5px]">{org.code}</span>} />
+   191→                <DefRow label="Billing address" value={`${dashed(org.billingLine1)}, ${dashed(org.billingCity)}, ${dashed(org.billingProvince)} ${dashed(org.billingPostal)}`} />
+   192→                <DefRow label="Phone" value={dashed(org.phone)} />
+   193→              </dl>
+   194→            </SectionCard>
+   195→
+   196→            <SectionCard title="Portal users" description="Contacts who can sign in on behalf of this customer">
+   197→              <ul className="space-y-2">
+   198→                {users.map((u) => (
+   199→                  <li key={u.id} className="flex items-center justify-between gap-3 rounded-lg border bg-card px-3.5 py-2.5">
+   200→                    <div className="min-w-0">
+   201→                      <p className="truncate text-[13px] font-medium">
+   202→                        {u.name}
+   203→                        {u.title && <span className="ml-1.5 text-[11.5px] font-normal text-muted-foreground">· {u.title}</span>}
+   204→                      </p>
+   205→                      <p className="truncate text-[12px] text-muted-foreground">{u.email}</p>
+   206→                    </div>
+   207→                    <UserStatusBadge status={u.status} />
+   208→                  </li>
+   209→                ))}
+   210→                {users.length === 0 && (
+   211→                  <p className="rounded-lg border border-dashed bg-muted/30 px-4 py-6 text-center text-[13px] text-muted-foreground">
+   212→                    No portal users yet — invite one from the header.
+   213→                  </p>
+   214→                )}
+   215→              </ul>
+   216→            </SectionCard>
+   217→          </div>
+   218→        </TabsContent>
+   219→
+   220→        {/* Contacts & addresses */}
+   221→        <TabsContent value="contacts" className="space-y-4 sm:space-y-6">
+   222→          <SectionCard
+   223→            title="Portal users"
+   224→            description="Enable or disable sign-in access; new users start as invited"
+   225→            action={
+   226→              <Button variant="outline" size="sm" className="h-8 gap-1.5 text-[12.5px]" onClick={() => setInviteOpen(true)}>
+   227→                <UserPlus className="size-3.5" aria-hidden /> Invite user
+   228→              </Button>
+   229→            }
+   230→            bodyClassName="p-0 sm:p-0"
+   231→          >
+   232→            {users.length === 0 ? (
+   233→              <div className="p-4 sm:p-5">
+   234→                <EmptyState
+   235→                  icon={Users}
+   236→                  title="No portal users"
+   237→                  description="Invite a user so this customer can sign in to their portal."
+   238→                  action={
+   239→                    <Button variant="outline" onClick={() => setInviteOpen(true)}>
+   240→                      <UserPlus className="size-4" aria-hidden /> Invite user
+   241→                    </Button>
+   242→                  }
+   243→                />
+   244→              </div>
+   245→            ) : (
+   246→              <div className="overflow-x-auto">
+   247→                <Table className="min-w-[640px]">
+   248→                  <TableHeader>
+   249→                    <TableRow>
+   250→                      <Th>Name</Th>
+   251→                      <Th>Email</Th>
+   252→                      <Th>Status</Th>
+   253→                      <Th>Last login</Th>
+   254→                      <Th className="text-center">Access</Th>
+   255→                    </TableRow>
+   256→                  </TableHeader>
+   257→                  <TableBody>
+   258→                    {users.map((u) => (
+   259→                      <UserRow key={u.id} user={u} customerId={customerId} onDone={invalidate} />
+   260→                    ))}
+   261→                  </TableBody>
+   262→                </Table>
+   263→              </div>
+   264→            )}
+   265→          </SectionCard>
+   266→
+   267→          <SectionCard title="Shipping addresses" description="Delivery destinations maintained by the customer">
+   268→            {addresses.length === 0 ? (
+   269→              <p className="rounded-lg border border-dashed bg-muted/30 px-4 py-6 text-center text-[13px] text-muted-foreground">
+   270→                This customer has not saved any shipping addresses yet.
+   271→              </p>
+   272→            ) : (
+   273→              <ul className="grid gap-3 sm:grid-cols-2">
+   274→                {addresses.map((a) => (
+   275→                  <li key={a.id} className="rounded-lg border bg-card p-3.5">
+   276→                    <div className="flex items-center justify-between gap-2">
+   277→                      <GroupLabel>{a.label}</GroupLabel>
+   278→                      {a.isDefault && (
+   279→                        <span className="rounded border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[10.5px] font-medium text-emerald-700">
+   280→                          Default
+   281→                        </span>
+   282→                      )}
+   283→                    </div>
+   284→                    <p className="mt-1.5 text-[13px] leading-relaxed">
+   285→                      {a.line1}{a.line2 ? `, ${a.line2}` : ""}
+   286→                      <br />
+   287→                      {a.city}, {a.province} {a.postal}
+   288→                    </p>
+   289→                  </li>
+   290→                ))}
+   291→              </ul>
+   292→            )}
+   293→          </SectionCard>
+   294→        </TabsContent>
+   295→
+   296→        {/* Products & pricing */}
+   297→        <TabsContent value="pricing">
+   298→          <SectionCard title="Products &amp; pricing" description={`Customer price overrides, catalogue access and pricing notes for ${org.name}`}>
+   299→            <PricingMatrix orgId={customerId} />
+   300→          </SectionCard>
+   301→        </TabsContent>
+   302→
+   303→        {/* Orders */}
+   304→        <TabsContent value="orders">
+   305→          <SectionCard title="Orders" description={`${orders.length} ${orders.length === 1 ? "order" : "orders"} placed by this customer`} bodyClassName="p-0 sm:p-0">
+   306→            {orders.length === 0 ? (
+   307→              <div className="p-4 sm:p-5">
+   308→                <EmptyState icon={ReceiptText} title="No orders yet" description="Their order requests will appear here." />
+   309→              </div>
+   310→            ) : (
+   311→              <div className="overflow-x-auto">
+   312→                <Table className="min-w-[700px]">
+   313→                  <TableHeader>
+   314→                    <TableRow>
+   315→                      <Th>Order #</Th>
+   316→                      <Th>Submitted</Th>
+   317→                      <Th>Summary</Th>
+   318→                      <Th className="text-right">Total</Th>
+   319→                      <Th>Status</Th>
+   320→                      <Th>Est. delivery</Th>
+   321→                    </TableRow>
+   322→                  </TableHeader>
+   323→                  <TableBody>
+   324→                    {orders.map((o) => (
+   325→                      <TableRow key={o.id} className="cursor-pointer" onClick={() => navigate("admin-order-detail", { id: o.id })}>
+   326→                        <Td>
+   327→                          <span className="font-mono text-[12.5px] font-medium">{o.orderNumber}</span>
+   328→                        </Td>
+   329→                        <Td className="whitespace-nowrap text-muted-foreground">{formatDate(o.createdAt)}</Td>
+   330→                        <Td className="max-w-[210px] truncate text-muted-foreground">{o.itemSummary}</Td>
+   331→                        <Td className="text-right font-medium">
+   332→                          <Money cents={o.totalCents} />
+   333→                        </Td>
+   334→                        <Td>
+   335→                          <StatusBadge status={o.status} kind="order" />
+   336→                        </Td>
+   337→                        <Td className="whitespace-nowrap text-muted-foreground">{formatDate(o.estimatedDelivery)}</Td>
+   338→                      </TableRow>
+   339→                    ))}
+   340→                  </TableBody>
+   341→                </Table>
+   342→              </div>
+   343→            )}
+   344→          </SectionCard>
+   345→        </TabsContent>
+   346→
+   347→        {/* Quotations */}
+   348→        <TabsContent value="quotes">
+   349→          <SectionCard title="Quotations" description={`${quotations.length} quotation ${quotations.length === 1 ? "request" : "requests"} from this customer`} bodyClassName="p-0 sm:p-0">
+   350→            {quotations.length === 0 ? (
+   351→              <div className="p-4 sm:p-5">
+   352→                <EmptyState icon={FileText} title="No quotations yet" description="Their quotation requests will appear here." />
+   353→              </div>
+   354→            ) : (
+   355→              <div className="overflow-x-auto">
+   356→                <Table className="min-w-[720px]">
+   357→                  <TableHeader>
+   358→                    <TableRow>
+   359→                      <Th>Quote #</Th>
+   360→                      <Th>Title</Th>
+   361→                      <Th>Status</Th>
+   362→                      <Th className="text-right">Total</Th>
+   363→                      <Th>Created</Th>
+   364→                      <Th>Expires</Th>
+   365→                    </TableRow>
+   366→                  </TableHeader>
+   367→                  <TableBody>
+   368→                    {quotations.map((q) => (
+   369→                      <TableRow key={q.id} className="cursor-pointer" onClick={() => navigate("admin-quote-detail", { id: q.id })}>
+   370→                        <Td>
+   371→                          <span className="font-mono text-[12.5px] font-medium">{q.quoteNumber}</span>
+   372→                          {q.revision > 0 && <p className="text-[11px] text-muted-foreground">Rev {q.revision}</p>}
+   373→                        </Td>
+   374→                        <Td className="max-w-[260px] truncate">{q.title}</Td>
+   375→                        <Td>
+   376→                          <StatusBadge status={q.status} kind="quote" />
+   377→                        </Td>
+   378→                        <Td className="text-right font-medium">
+   379→                          {q.itemsTotalCents > 0 ? <Money cents={q.itemsTotalCents} /> : <span className="text-[12px] text-muted-foreground">Not priced</span>}
+   380→                        </Td>
+   381→                        <Td className="whitespace-nowrap text-muted-foreground">{formatDate(q.createdAt)}</Td>
+   382→                        <Td className="whitespace-nowrap text-muted-foreground">{formatDate(q.expiryDate)}</Td>
+   383→                      </TableRow>
+   384→                    ))}
+   385→                  </TableBody>
+   386→                </Table>
+   387→              </div>
+   388→            )}
+   389→          </SectionCard>
+   390→        </TabsContent>
+   391→
+   392→        {/* Documents */}
+   393→        <TabsContent value="documents">
+   394→          <SectionCard title="Documents" description={`${documents.length} ${documents.length === 1 ? "document" : "documents"} shared with this customer`} bodyClassName="p-0 sm:p-0">
+   395→            {documents.length === 0 ? (
+   396→              <div className="p-4 sm:p-5">
+   397→                <EmptyState
+   398→                  icon={FileText}
+   399→                  title="No documents"
+   400→                  description="Upload invoices, statements and specifications from the Documents area."
+   401→                  action={
+   402→                    <Button variant="outline" onClick={() => navigate("admin-documents")}>
+   403→                      Go to Documents
+   404→                    </Button>
+   405→                  }
+   406→                />
+   407→              </div>
+   408→            ) : (
+   409→              <ul className="divide-y md:p-0">
+   410→                {documents.map((doc) => (
+   411→                  <li key={doc.id} className="flex flex-wrap items-center gap-2.5 px-4 py-3 sm:px-5">
+   412→                    <FileText className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+   413→                    <div className="min-w-0 flex-1">
+   414→                      <p className="truncate text-[13px] font-medium">{doc.title}</p>
+   415→                      <p className="truncate text-[11.5px] text-muted-foreground">
+   416→                        <span className="font-mono">{doc.fileName}</span> · {doc.sizeLabel} · uploaded {formatDate(doc.createdAt)}
+   417→                        {doc.orderNumber ? ` · ${doc.orderNumber}` : ""}
+   418→                      </p>
+   419→                    </div>
+   420→                    <DocumentCategoryBadge category={doc.category} />
+   421→                  </li>
+   422→                ))}
+   423→              </ul>
+   424→            )}
+   425→          </SectionCard>
+   426→        </TabsContent>
+   427→
+   428→        {/* Internal */}
+   429→        <TabsContent value="internal">
+   430→          <InternalNotesCard customerId={customerId} initialNotes={org.internalNotes} onSaved={invalidate} />
+   431→        </TabsContent>
+   432→      </Tabs>
+   433→
+   434→      {/* Suspend confirm */}
+   435→      <AlertDialog open={suspendOpen} onOpenChange={setSuspendOpen}>
+   436→        <AlertDialogContent>
+   437→          <AlertDialogHeader>
+   438→            <AlertDialogTitle>Suspend {org.name}?</AlertDialogTitle>
+   439→            <AlertDialogDescription className="leading-relaxed">
+   440→              Their portal users will be signed out and unable to sign in, place order requests or receive quotations.
+   441→              Historical orders, documents and pricing are preserved and the account can be reactivated at any time.
+   442→            </AlertDialogDescription>
+   443→          </AlertDialogHeader>
+   444→          <AlertDialogFooter>
+   445→            <AlertDialogCancel>Keep active</AlertDialogCancel>
+   446→            <AlertDialogAction
+   447→              className="bg-red-600 text-white hover:bg-red-700"
+   448→              disabled={statusMutation.isPending}
+   449→              onClick={(e) => {
+   450→                e.preventDefault();
+   451→                statusMutation.mutate("SUSPENDED");
+   452→              }}
+   453→            >
+   454→              {statusMutation.isPending ? "Suspending…" : "Yes, suspend customer"}
+   455→            </AlertDialogAction>
+   456→          </AlertDialogFooter>
+   457→        </AlertDialogContent>
+   458→      </AlertDialog>
+   459→
+   460→      {/* Edit info dialog */}
+   461→      <EditCustomerDialog open={editOpen} onOpenChange={setEditOpen} profile={profile} onSaved={invalidate} />
+   462→
+   463→      {/* Invite user dialog */}
+   464→      <InviteUserDialog open={inviteOpen} onOpenChange={setInviteOpen} customerId={customerId} onSaved={invalidate} />
+   465→    </div>
+   466→  );
+   467→}
+   468→
+   469→// ─── User access row ──────────────────────────────────────────────────────────
+   470→
+   471→function UserRow({
+   472→  user,
+   473→  customerId,
+   474→  onDone,
+   475→}: {
+   476→  user: CustomerProfile["users"][number];
+   477→  customerId: string;
+   478→  onDone: () => void;
+   479→}) {
+   480→  const queryClient = useQueryClient();
+   481→  const [confirmDisable, setConfirmDisable] = useState(false);
+   482→
+   483→  const toggle = useMutation({
+   484→    mutationFn: (status: "ACTIVE" | "DISABLED") =>
+   485→      api.put<{ ok: boolean }>(`/api/admin/customers/${customerId}/users/${user.id}`, { status }),
+   486→    onSuccess: (_res, status) => {
+   487→      queryClient.invalidateQueries({ queryKey: ["admin", "customer", customerId] });
+   488→      queryClient.invalidateQueries({ queryKey: ["admin", "customers"] });
+   489→      onDone();
+   490→      toast({
+   491→        title: status === "ACTIVE" ? `${user.name} can sign in again` : `${user.name} disabled`,
+   492→        description: status === "DISABLED" ? "They can no longer access the customer portal." : "Portal access restored.",
+   493→      });
+   494→      setConfirmDisable(false);
+   495→    },
+   496→    onError: (err: Error) => toast({ title: "Could not change user status.", description: err.message }),
+   497→  });
+   498→
+   499→  const enabled = user.status !== "DISABLED";
+   500→
+   501→  return (
+   502→    <TableRow>
+   503→      <Td>
+   504→        <p className="font-medium">{user.name}</p>
+   505→        {user.title && <p className="text-[11.5px] text-muted-foreground">{user.title}</p>}
+   506→      </Td>
+   507→      <Td className="text-muted-foreground">{user.email}</Td>
+   508→      <Td>
+   509→        <UserStatusBadge status={user.status} />
+   510→      </Td>
+   511→      <Td className="whitespace-nowrap text-muted-foreground">
+   512→        {user.lastLoginAt ? (
+   513→          <span>
+   514→            {formatDate(user.lastLoginAt)}
+   515→            <span className="ml-1.5 text-[11px] text-muted-foreground/70">{timeAgo(user.lastLoginAt)}</span>
+   516→          </span>
+   517→        ) : (
+   518→          "Never"
+   519→        )}
+   520→      </Td>
+   521→      <Td className="text-center">
+   522→        <div className="flex items-center justify-center gap-2">
+   523→          <Switch
+   524→            checked={enabled}
+   525→            disabled={toggle.isPending}
+   526→            onCheckedChange={(v) => (v ? toggle.mutate("ACTIVE") : setConfirmDisable(true))}
+   527→            aria-label={`Toggle portal access for ${user.name}`}
+   528→          />
+   529→          <span className="text-[11.5px] text-muted-foreground">{enabled ? "Enabled" : "Disabled"}</span>
+   530→        </div>
+   531→      </Td>
+   532→      <AlertDialog open={confirmDisable} onOpenChange={setConfirmDisable}>
+   533→        <AlertDialogContent>
+   534→          <AlertDialogHeader>
+   535→            <AlertDialogTitle>Disable {user.name}?</AlertDialogTitle>
+   536→            <AlertDialogDescription className="leading-relaxed">
+   537→              They will immediately lose access to the customer portal for this organization until re-enabled. Orders and
+   538→              messages they submitted are preserved.
+   539→            </AlertDialogDescription>
+   540→          </AlertDialogHeader>
+   541→          <AlertDialogFooter>
+   542→            <AlertDialogCancel>Keep access</AlertDialogCancel>
+   543→            <AlertDialogAction
+   544→              className="bg-red-600 text-white hover:bg-red-700"
+   545→              disabled={toggle.isPending}
+   546→              onClick={() => toggle.mutate("DISABLED")}
+   547→            >
+   548→              {toggle.isPending ? "Disabling…" : "Yes, disable user"}
+   549→            </AlertDialogAction>
+   550→          </AlertDialogFooter>
+   551→        </AlertDialogContent>
+   552→      </AlertDialog>
+   553→    </TableRow>
+   554→  );
+   555→}
+   556→
+   557→// ─── Internal notes ────────────────────────────────────────────────────────────
+   558→
+   559→function InternalNotesCard({
+   560→  customerId,
+   561→  initialNotes,
+   562→  onSaved,
+   563→}: {
+   564→  customerId: string;
+   565→  initialNotes: string | null;
+   566→  onSaved: () => void;
+   567→}) {
+   568→  const [notes, setNotes] = useState(initialNotes ?? "");
+   569→  const dirty = notes !== (initialNotes ?? "");
+   570→
+   571→  const save = useMutation({
+   572→    mutationFn: () => api.put<{ ok: boolean }>(`/api/admin/customers/${customerId}`, { internalNotes: notes.trim() || null }),
+   573→    onSuccess: () => {
+   574→      onSaved();
+   575→      toast({ title: "Internal notes saved", description: "Notes are visible to Jeffery Group staff only." });
+   576→    },
+   577→    onError: (err: Error) => toast({ title: "Could not save notes.", description: err.message }),
+   578→  });
+   579→
+   580→  return (
+   581→    <SectionCard
+   582→      title="Internal notes"
+   583→      description="Account intelligence for the Jeffery Group team — never shown to the customer"
+   584→    >
+   585→      <Textarea
+   586→        rows={7}
+   587→        value={notes}
+   588→        onChange={(e) => setNotes(e.target.value)}
+   589→        placeholder="Rate confirmations, delivery preferences, escalations, credit flags…"
+   590→        className="text-[13px] leading-relaxed"
+   591→        aria-label="Internal notes"
+   592→      />
+   593→      <div className="mt-3 flex items-center justify-between gap-3 border-t pt-3">
+   594→        <p className="text-[11.5px] text-muted-foreground">
+   595→          {notes.trim().length} characters · last saved state shown when the profile reloads
+   596→        </p>
+   597→        <Button className="gap-1.5" size="sm" disabled={!dirty || save.isPending} onClick={() => save.mutate()}>
+   598→          <Save className="size-3.5" aria-hidden />
+   599→          {save.isPending ? "Saving…" : "Save notes"}
+   600→        </Button>
+   601→      </div>
+   602→    </SectionCard>
+   603→  );
+   604→}
+   605→
+   606→// ─── Edit customer dialog ─────────────────────────────────────────────────────
+   607→
+   608→function EditCustomerDialog({
+   609→  open,
+   610→  onOpenChange,
+   611→  profile,
+   612→  onSaved,
+   613→}: {
+   614→  open: boolean;
+   615→  onOpenChange: (v: boolean) => void;
+   616→  profile: CustomerProfile;
+   617→  onSaved: () => void;
+   618→}) {
+   619→  const org = profile.organization;
+   620→  const [form, setForm] = useState({
+   621→    name: org.name,
+   622→    phone: org.phone,
+   623→    billingLine1: org.billingLine1,
+   624→    billingCity: org.billingCity,
+   625→    billingProvince: org.billingProvince,
+   626→    billingPostal: org.billingPostal,
+   627→  });
+   628→  const [submitError, setSubmitError] = useState<string | null>(null);
+   629→
+   630→  const save = useMutation({
+   631→    mutationFn: () =>
+   632→      api.put<{ ok: boolean }>(`/api/admin/customers/${org.id}`, {
+   633→        name: form.name.trim(),
+   634→        phone: form.phone.trim() || null,
+   635→        billingLine1: form.billingLine1.trim() || null,
+   636→        billingCity: form.billingCity.trim() || null,
+   637→        billingProvince: form.billingProvince.trim() || null,
+   638→        billingPostal: form.billingPostal.trim() || null,
+   639→      }),
+   640→    onSuccess: () => {
+   641→      onSaved();
+   642→      onOpenChange(false);
+   643→      toast({ title: "Customer details updated" });
+   644→    },
+   645→    onError: (err: Error) => setSubmitError(err.message),
+   646→  });
+   647→
+   648→  const set = (key: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
+   649→    setForm((f) => ({ ...f, [key]: e.target.value }));
+   650→
+   651→  return (
+   652→    <Dialog open={open} onOpenChange={(v) => { onOpenChange(v); if (!v) setSubmitError(null); }}>
+   653→      <DialogContent className="sm:max-w-[520px]">
+   654→        <form
+   655→          onSubmit={(e) => {
+   656→            e.preventDefault();
+   657→            setSubmitError(null);
+   658→            if (!form.name.trim()) {
+   659→              setSubmitError("Business name is required.");
+   660→              return;
+   661→            }
+   662→            save.mutate();
+   663→          }}
+   664→          className="space-y-4"
+   665→        >
+   666→          <DialogHeader className="border-b pb-4">
+   667→            <DialogTitle className="text-[15px] font-medium">Edit customer details</DialogTitle>
+   668→            <DialogDescription className="text-[12.5px] leading-relaxed">
+   669→              Billing information appears on invoices and statements for <span className="font-mono">{org.code}</span>.
+   670→            </DialogDescription>
+   671→          </DialogHeader>
+   672→
+   673→          <div className="grid gap-3.5 sm:grid-cols-2">
+   674→            <div className="space-y-1.5 sm:col-span-2">
+   675→              <Label htmlFor="edit-name" className="text-[12.5px]">Business name</Label>
+   676→              <Input id="edit-name" value={form.name} onChange={set("name")} className="h-9 text-[13px]" required />
+   677→            </div>
+   678→            <div className="space-y-1.5 sm:col-span-2">
+   679→              <Label htmlFor="edit-phone" className="text-[12.5px]">Phone</Label>
+   680→              <Input id="edit-phone" value={form.phone} onChange={set("phone")} placeholder="(416) 555-0182" className="h-9 text-[13px]" />
+   681→            </div>
+   682→            <div className="space-y-1.5 sm:col-span-2">
+   683→              <GroupLabel className="mb-1">Billing address</GroupLabel>
+   684→              <div className="grid gap-3.5 sm:grid-cols-2">
+   685→                <div className="space-y-1.5 sm:col-span-2">
+   686→                  <Label htmlFor="edit-line1" className="text-[12.5px]">Street address</Label>
+   687→                  <Input id="edit-line1" value={form.billingLine1} onChange={set("billingLine1")} className="h-9 text-[13px]" />
+   688→                </div>
+   689→                <div className="space-y-1.5">
+   690→                  <Label htmlFor="edit-city" className="text-[12.5px]">City</Label>
+   691→                  <Input id="edit-city" value={form.billingCity} onChange={set("billingCity")} className="h-9 text-[13px]" />
+   692→                </div>
+   693→                <div className="grid grid-cols-2 gap-3.5">
+   694→                  <div className="space-y-1.5">
+   695→                    <Label htmlFor="edit-province" className="text-[12.5px]">Province</Label>
+   696→                    <Input id="edit-province" value={form.billingProvince} onChange={set("billingProvince")} maxLength={2} className="h-9 text-[13px]" />
+   697→                  </div>
+   698→                  <div className="space-y-1.5">
+   699→                    <Label htmlFor="edit-postal" className="text-[12.5px]">Postal</Label>
+   700→                    <Input id="edit-postal" value={form.billingPostal} onChange={set("billingPostal")} className="h-9 text-[13px]" />
+   701→                  </div>
+   702→                </div>
+   703→              </div>
+   704→            </div>
+   705→          </div>
+   706→
+   707→          {submitError && <p className="text-[12.5px] text-red-600">{submitError}</p>}
+   708→
+   709→          <DialogFooter className="border-t pt-4">
+   710→            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
+   711→            <Button type="submit" className="gap-1.5" disabled={save.isPending}>
+   712→              <PencilLine className="size-4" aria-hidden />
+   713→              {save.isPending ? "Saving…" : "Save changes"}
+   714→            </Button>
+   715→          </DialogFooter>
+   716→        </form>
+   717→      </DialogContent>
+   718→    </Dialog>
+   719→  );
+   720→}
+   721→
+   722→// ─── Invite user dialog ───────────────────────────────────────────────────────
+   723→
+   724→function InviteUserDialog({
+   725→  open,
+   726→  onOpenChange,
+   727→  customerId,
+   728→  onSaved,
+   729→}: {
+   730→  open: boolean;
+   731→  onOpenChange: (v: boolean) => void;
+   732→  customerId: string;
+   733→  onSaved: () => void;
+   734→}) {
+   735→  const [form, setForm] = useState({ email: "", name: "", title: "" });
+   736→  const [result, setResult] = useState<{ tempPassword: string } | null>(null);
+   737→  const [submitError, setSubmitError] = useState<string | null>(null);
+   738→
+   739→  const invite = useMutation({
+   740→    mutationFn: () =>
+   741→      api.post<{ tempPassword: string }>(`/api/admin/customers/${customerId}/users`, {
+   742→        email: form.email.trim(),
+   743→        name: form.name.trim(),
+   744→        title: form.title.trim() || undefined,
+   745→      }),
+   746→    onSuccess: (res) => {
+   747→      setResult(res);
+   748→      onSaved();
+   749→      toast({ title: "Invitation created", description: "Share the temporary password to complete onboarding." });
+   750→    },
+   751→    onError: (err: Error) => setSubmitError(err.message),
+   752→  });
+   753→
+   754→  function reset() {
+   755→    setForm({ email: "", name: "", title: "" });
+   756→    setResult(null);
+   757→    setSubmitError(null);
+   758→    invite.reset();
+   759→  }
+   760→
+   761→  return (
+   762→    <Dialog open={open} onOpenChange={(v) => { onOpenChange(v); if (!v) reset(); }}>
+   763→      <DialogContent className="sm:max-w-[460px]">
+   764→        {result ? (
+   765→          <>
+   766→            <DialogHeader className="border-b pb-4">
+   767→              <DialogTitle className="text-[15px] font-medium">Portal user invited</DialogTitle>
+   768→              <DialogDescription className="text-[12.5px] leading-relaxed">
+   769→                {form.name.trim()} has been added with invited status. Copy the temporary password below — it will not
+   770→                be shown again.
+   771→              </DialogDescription>
+   772→            </DialogHeader>
+   773→            <TempPasswordPanel email={form.email.trim()} password={result.tempPassword} />
+   774→            <DialogFooter className="border-t pt-4">
+   775→              <Button variant="outline" onClick={reset}>Invite another</Button>
+   776→              <Button onClick={() => { onOpenChange(false); reset(); }}>Done</Button>
+   777→            </DialogFooter>
+   778→          </>
+   779→        ) : (
+   780→          <form
+   781→            onSubmit={(e) => {
+   782→              e.preventDefault();
+   783→              setSubmitError(null);
+   784→              if (!form.email.trim() || !form.name.trim()) {
+   785→                setSubmitError("Name and email are required.");
+   786→                return;
+   787→              }
+   788→              if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) {
+   789→                setSubmitError("Enter a valid email address.");
+   790→                return;
+   791→              }
+   792→              invite.mutate();
+   793→            }}
+   794→            className="space-y-4"
+   795→          >
+   796→            <DialogHeader className="border-b pb-4">
+   797→              <DialogTitle className="text-[15px] font-medium">Invite portal user</DialogTitle>
+   798→              <DialogDescription className="text-[12.5px] leading-relaxed">
+   799→                Creates a user who can sign in and transact on behalf of this customer.
+   800→              </DialogDescription>
+   801→            </DialogHeader>
+   802→            <div className="grid gap-3.5">
+   803→              <div className="space-y-1.5">
+   804→                <Label htmlFor="invite-name" className="text-[12.5px]">Full name</Label>
+   805→                <Input id="invite-name" value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="e.g. Sofia Lindqvist" className="h-9 text-[13px]" required />
+   806→              </div>
+   807→              <div className="space-y-1.5">
+   808→                <Label htmlFor="invite-email" className="text-[12.5px]">Email address</Label>
+   809→                <Input id="invite-email" type="email" value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} placeholder="sofia@company.com" className="h-9 text-[13px]" required />
+   810→              </div>
+   811→              <div className="space-y-1.5">
+   812→                <Label htmlFor="invite-title" className="text-[12.5px]">Job title <span className="text-muted-foreground">(optional)</span></Label>
+   813→                <Input id="invite-title" value={form.title} onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))} placeholder="e.g. Operations Manager" className="h-9 text-[13px]" />
+   814→              </div>
+   815→            </div>
+   816→            {submitError && <p className="text-[12.5px] text-red-600">{submitError}</p>}
+   817→            <DialogFooter className="border-t pt-4">
+   818→              <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Cancel</Button>
+   819→              <Button type="submit" className="gap-1.5" disabled={invite.isPending}>
+   820→                <Plus className="size-4" aria-hidden />
+   821→                {invite.isPending ? "Inviting…" : "Create invitation"}
+   822→              </Button>
+   823→            </DialogFooter>
+   824→          </form>
+   825→        )}
+   826→      </DialogContent>
+   827→    </Dialog>
+   828→  );
+   829→}
+   830→

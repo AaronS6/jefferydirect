@@ -1,0 +1,720 @@
+     1→"use client";
+     2→
+     3→// "Record an order received outside ClientHub" — for orders customers place
+     4→// by email, phone or in person. Recorded orders appear in the customer's own
+     5→// history and (optionally) notify their organization.
+     6→
+     7→import { useState } from "react";
+     8→import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+     9→import { ClipboardCheck, Plus, X } from "lucide-react";
+    10→import { Button } from "@/components/ui/button";
+    11→import { Input } from "@/components/ui/input";
+    12→import { Label } from "@/components/ui/label";
+    13→import { Textarea } from "@/components/ui/textarea";
+    14→import { Switch } from "@/components/ui/switch";
+    15→import {
+    16→  Dialog,
+    17→  DialogContent,
+    18→  DialogDescription,
+    19→  DialogFooter,
+    20→  DialogHeader,
+    21→  DialogTitle,
+    22→} from "@/components/ui/dialog";
+    23→import {
+    24→  Select,
+    25→  SelectContent,
+    26→  SelectGroup,
+    27→  SelectItem,
+    28→  SelectLabel,
+    29→  SelectTrigger,
+    30→  SelectValue,
+    31→} from "@/components/ui/select";
+    32→import { QtyStepper } from "@/components/portal/portal-bits";
+    33→import { Money } from "@/components/shared/money";
+    34→import { api } from "@/lib/api-client";
+    35→import { DEFAULT_TAX_RATE_BP, ORDER_SOURCE_LABELS, ORDER_STATUSES, ORDER_STATUS_LABELS } from "@/lib/constants";
+    36→import { centsToInputValue, parseDollarsToCents, taxFromSubtotalCents } from "@/lib/money";
+    37→import { useAppStore } from "@/store/app-store";
+    38→import { toast } from "@/hooks/use-toast";
+    39→import type { AdminProduct, CustomerListItem, CustomerProfile } from "@/types";
+    40→import { FieldError, GroupLabel } from "./admin-ui";
+    41→
+    42→const NONE = "__none__";
+    43→const SOURCES = ["EMAIL", "PHONE", "IN_PERSON"] as const;
+    44→
+    45→type ProductLine = {
+    46→  kind: "PRODUCT";
+    47→  productId: string;
+    48→  sku: string;
+    49→  name: string;
+    50→  qty: number;
+    51→  // null = follow the customer's live effective price (shown pre-filled);
+    52→  // a string = an admin-entered agreed price in dollars ("0.42", "12.50")
+    53→  priceInput: string | null;
+    54→};
+    55→
+    56→type CustomLine = {
+    57→  kind: "CUSTOM";
+    58→  name: string;
+    59→  description: string;
+    60→  qty: number;
+    61→  priceInput: string | null;
+    62→};
+    63→
+    64→type Line = ProductLine | CustomLine;
+    65→
+    66→export function AdminNewOrderDialog({
+    67→  open,
+    68→  onOpenChange,
+    69→}: {
+    70→  open: boolean;
+    71→  onOpenChange: (v: boolean) => void;
+    72→}) {
+    73→  const navigate = useAppStore((s) => s.navigate);
+    74→  const queryClient = useQueryClient();
+    75→
+    76→  const { data: customers } = useQuery({
+    77→    queryKey: ["admin", "customers", ""],
+    78→    queryFn: () => api.get<CustomerListItem[]>("/api/admin/customers?search="),
+    79→    enabled: open,
+    80→  });
+    81→
+    82→  const { data: products } = useQuery({
+    83→    queryKey: ["admin", "products", { search: "", category: "" }],
+    84→    queryFn: () => api.get<AdminProduct[]>("/api/admin/products"),
+    85→    enabled: open,
+    86→  });
+    87→
+    88→  const [orgId, setOrgId] = useState("");
+    89→  const [sourceType, setSourceType] = useState<string>("EMAIL");
+    90→  const [status, setStatus] = useState<string>("CONFIRMED");
+    91→  const [lines, setLines] = useState<Line[]>([]);
+    92→  const [addressId, setAddressId] = useState("");
+    93→  const [poNumber, setPoNumber] = useState("");
+    94→  const [notes, setNotes] = useState("");
+    95→  const [requestedDeliveryDate, setRequestedDeliveryDate] = useState("");
+    96→  const [estimatedDelivery, setEstimatedDelivery] = useState("");
+    97→  const [estimatedDispatch, setEstimatedDispatch] = useState("");
+    98→  const [tracking, setTracking] = useState("");
+    99→  const [notifyCustomer, setNotifyCustomer] = useState(true);
+   100→  const [submitError, setSubmitError] = useState<string | null>(null);
+   101→
+   102→  // Org-scoped profile: approved addresses + customer price overrides.
+   103→  const { data: profile } = useQuery({
+   104→    queryKey: ["admin", "customer", orgId],
+   105→    queryFn: () => api.get<CustomerProfile>(`/api/admin/customers/${orgId}`),
+   106→    enabled: open && orgId !== "",
+   107→  });
+   108→
+   109→  function resetForm() {
+   110→    setOrgId("");
+   111→    setSourceType("EMAIL");
+   112→    setStatus("CONFIRMED");
+   113→    setLines([]);
+   114→    setAddressId("");
+   115→    setPoNumber("");
+   116→    setNotes("");
+   117→    setRequestedDeliveryDate("");
+   118→    setEstimatedDelivery("");
+   119→    setEstimatedDispatch("");
+   120→    setTracking("");
+   121→    setNotifyCustomer(true);
+   122→    setSubmitError(null);
+   123→  }
+   124→
+   125→  function handleOpenChange(v: boolean) {
+   126→    if (v) resetForm();
+   127→    onOpenChange(v);
+   128→  }
+   129→
+   130→  const activeProducts = (products ?? []).filter((p) => p.isActive);
+   131→  const priceByProduct = new Map<string, number | null>();
+   132→  for (const price of profile?.prices ?? []) {
+   133→    priceByProduct.set(price.productId, price.priceCents);
+   134→  }
+   135→  for (const p of activeProducts) {
+   136→    if (!priceByProduct.has(p.id)) priceByProduct.set(p.id, p.defaultPriceCents);
+   137→  }
+   138→
+   139→  const productsByCategory = new Map<string, AdminProduct[]>();
+   140→  for (const p of activeProducts) {
+   141→    const list = productsByCategory.get(p.categoryName) ?? [];
+   142→    list.push(p);
+   143→    productsByCategory.set(p.categoryName, list);
+   144→  }
+   145→
+   146→  const approvedAddresses = (profile?.addresses ?? []).filter((a) => a.approvalStatus === "APPROVED");
+   147→
+   148→  function unitPrice(productId: string): number | null {
+   149→    return priceByProduct.get(productId) ?? null;
+   150→  }
+   151→
+   152→  /** The cents actually charged on a line: typed price > effective price. */
+   153→  function lineCents(line: Line): number | null {
+   154→    if (line.priceInput !== null) return parseDollarsToCents(line.priceInput);
+   155→    if (line.kind === "PRODUCT") return unitPrice(line.productId);
+   156→    return null;
+   157→  }
+   158→
+   159→  const subtotalCents = lines.reduce((sum, line) => {
+   160→    const cents = lineCents(line);
+   161→    return cents === null ? sum : sum + line.qty * cents;
+   162→  }, 0);
+   163→  const unpricedCount = lines.filter((l) => lineCents(l) === null).length;
+   164→  const taxCents = taxFromSubtotalCents(subtotalCents, DEFAULT_TAX_RATE_BP);
+   165→
+   166→  function addProduct(productId: string) {
+   167→    const product = activeProducts.find((p) => p.id === productId);
+   168→    if (!product) return;
+   169→    setLines((ls) => {
+   170→      const existing = ls.findIndex((l) => l.kind === "PRODUCT" && l.productId === productId);
+   171→      if (existing >= 0) {
+   172→        return ls.map((l, i) => (i === existing && l.kind === "PRODUCT" ? { ...l, qty: l.qty + 1 } : l));
+   173→      }
+   174→      return [...ls, { kind: "PRODUCT", productId, sku: product.sku, name: product.name, qty: 1, priceInput: null }];
+   175→    });
+   176→  }
+   177→
+   178→  const create = useMutation({
+   179→    mutationFn: () =>
+   180→      api.post<{ id: string; orderNumber: string }>("/api/admin/orders", {
+   181→        orgId,
+   182→        items: lines.map((line) => {
+   183→          const cents = lineCents(line);
+   184→          const priced = line.kind === "PRODUCT" || line.priceInput !== null ? cents : null;
+   185→          const payload =
+   186→            line.kind === "PRODUCT"
+   187→              ? { productId: line.productId, qty: line.qty }
+   188→              : {
+   189→                  custom: true,
+   190→                  name: line.name.trim(),
+   191→                  description: line.description.trim() || undefined,
+   192→                  qty: line.qty,
+   193→                };
+   194→          return priced === null ? payload : { ...payload, unitPriceCents: priced };
+   195→        }),
+   196→        addressId: addressId || undefined,
+   197→        poNumber: poNumber.trim() || undefined,
+   198→        notes: notes.trim() || undefined,
+   199→        requestedDeliveryDate: requestedDeliveryDate || undefined,
+   200→        estimatedDelivery: estimatedDelivery || undefined,
+   201→        estimatedDispatch: estimatedDispatch || undefined,
+   202→        sourceType,
+   203→        status,
+   204→        trackingNumber: tracking.trim() || undefined,
+   205→        notifyCustomer,
+   206→      }),
+   207→    onSuccess: (res) => {
+   208→      queryClient.invalidateQueries({ queryKey: ["admin", "orders"] });
+   209→      queryClient.invalidateQueries({ queryKey: ["admin", "overview"] });
+   210→      queryClient.invalidateQueries({ queryKey: ["notifications"] });
+   211→      queryClient.invalidateQueries({ queryKey: ["admin", "attention"] });
+   212→      if (orgId) queryClient.invalidateQueries({ queryKey: ["admin", "customer", orgId] });
+   213→      const orgName = (customers ?? []).find((c) => c.id === orgId)?.name ?? "the customer";
+   214→      toast({
+   215→        title: `${res.orderNumber} recorded for ${orgName}`,
+   216→        description: notifyCustomer
+   217→          ? "The order is now in their ClientHub history and the organization has been notified."
+   218→          : "The order is now in their ClientHub history — no notification was sent.",
+   219→      });
+   220→      onOpenChange(false);
+   221→      navigate("admin-order-detail", { id: res.id });
+   222→    },
+   223→    onError: (err: Error) => setSubmitError(err.message),
+   224→  });
+   225→
+   226→  function submit(e: React.FormEvent) {
+   227→    e.preventDefault();
+   228→    setSubmitError(null);
+   229→    if (!orgId) {
+   230→      setSubmitError("Choose the customer organization this order belongs to.");
+   231→      return;
+   232→    }
+   233→    if (lines.length === 0) {
+   234→      setSubmitError("Add at least one product or custom line.");
+   235→      return;
+   236→    }
+   237→    if (lines.some((l) => l.kind === "CUSTOM" && !l.name.trim())) {
+   238→      setSubmitError("Give every custom line a name (what was ordered).");
+   239→      return;
+   240→    }
+   241→    if (lines.some((l) => l.qty < 1)) {
+   242→      setSubmitError("Every line needs a quantity of at least 1.");
+   243→      return;
+   244→    }
+   245→    if (lines.some((l) => l.priceInput !== null && l.priceInput.trim() !== "" && parseDollarsToCents(l.priceInput) === null)) {
+   246→      setSubmitError("Enter unit prices as dollar amounts — for example 0.42 or 12.50.");
+   247→      return;
+   248→    }
+   249→    const unpricedProduct = lines.find((l) => l.kind === "PRODUCT" && lineCents(l) === null);
+   250→    if (unpricedProduct && unpricedProduct.kind === "PRODUCT") {
+   251→      setSubmitError(`${unpricedProduct.name} has no published price — enter the unit price agreed with the customer.`);
+   252→      return;
+   253→    }
+   254→    create.mutate();
+   255→  }
+   256→
+   257→  return (
+   258→    <Dialog open={open} onOpenChange={handleOpenChange}>
+   259→      <DialogContent className="max-h-[88vh] gap-0 overflow-y-auto sm:max-w-[720px]">
+   260→        <form onSubmit={submit} className="space-y-5">
+   261→          <DialogHeader className="border-b pb-4">
+   262→            <DialogTitle>Record an order received outside ClientHub</DialogTitle>
+   263→            <DialogDescription className="leading-relaxed">
+   264→              For orders customers place by email or phone — record the products, the pricing you agreed with them, and
+   265→              the delivery details. The order appears on the customer's account as their own, and they can follow its
+   266→              progress in ClientHub.
+   267→            </DialogDescription>
+   268→          </DialogHeader>
+   269→
+   270→          {/* Customer + provenance + status */}
+   271→          <div className="grid gap-3.5 sm:grid-cols-2">
+   272→            <div className="space-y-1.5 sm:col-span-2">
+   273→              <Label htmlFor="rec-org" className="text-body-sm">
+   274→                Customer organization
+   275→              </Label>
+   276→              <Select
+   277→                value={orgId}
+   278→                onValueChange={(v) => {
+   279→                  setOrgId(v);
+   280→                  setAddressId("");
+   281→                }}
+   282→              >
+   283→                <SelectTrigger id="rec-org" className="h-9 w-full text-body-sm" aria-label="Customer organization">
+   284→                  <SelectValue placeholder="Choose a customer…" />
+   285→                </SelectTrigger>
+   286→                <SelectContent>
+   287→                  {(customers ?? []).map((c) => (
+   288→                    <SelectItem key={c.id} value={c.id}>
+   289→                      {c.name}
+   290→                      <span className="ml-1.5 font-mono text-caption text-muted-foreground">{c.code}</span>
+   291→                    </SelectItem>
+   292→                  ))}
+   293→                </SelectContent>
+   294→              </Select>
+   295→              {orgId && profile && (
+   296→                <p className="tnum text-caption text-muted-foreground">
+   297→                  {approvedAddresses.length} approved shipping {approvedAddresses.length === 1 ? "address" : "addresses"} ·{" "}
+   298→                  {profile.prices.filter((p) => p.priceCents !== null).length} custom prices applied
+   299→                </p>
+   300→              )}
+   301→            </div>
+   302→            <div className="space-y-1.5">
+   303→              <Label htmlFor="rec-source" className="text-body-sm">
+   304→                How was this order received?
+   305→              </Label>
+   306→              <Select value={sourceType} onValueChange={setSourceType}>
+   307→                <SelectTrigger id="rec-source" className="h-9 w-full text-body-sm" aria-label="Order source">
+   308→                  <SelectValue />
+   309→                </SelectTrigger>
+   310→                <SelectContent>
+   311→                  {SOURCES.map((s) => (
+   312→                    <SelectItem key={s} value={s}>
+   313→                      {ORDER_SOURCE_LABELS[s]}
+   314→                    </SelectItem>
+   315→                  ))}
+   316→                </SelectContent>
+   317→              </Select>
+   318→            </div>
+   319→            <div className="space-y-1.5">
+   320→              <Label htmlFor="rec-status" className="text-body-sm">
+   321→                Initial status
+   322→              </Label>
+   323→              <Select value={status} onValueChange={setStatus}>
+   324→                <SelectTrigger id="rec-status" className="h-9 w-full text-body-sm" aria-label="Initial order status">
+   325→                  <SelectValue />
+   326→                </SelectTrigger>
+   327→                <SelectContent>
+   328→                  <SelectGroup>
+   329→                    <SelectLabel className="text-micro">
+   330→                      Fulfilment workflow
+   331→                    </SelectLabel>
+   332→                    {ORDER_STATUSES.map((s) => (
+   333→                      <SelectItem key={s} value={s}>
+   334→                        {ORDER_STATUS_LABELS[s]}
+   335→                      </SelectItem>
+   336→                    ))}
+   337→                  </SelectGroup>
+   338→                  <SelectGroup>
+   339→                    <SelectLabel className="text-micro text-[var(--status-danger-fg)]">
+   340→                      Terminal — notifies customer
+   341→                    </SelectLabel>
+   342→                    <SelectItem value="CANCELLED">Cancelled</SelectItem>
+   343→                    <SelectItem value="REJECTED">Rejected</SelectItem>
+   344→                  </SelectGroup>
+   345→                </SelectContent>
+   346→              </Select>
+   347→            </div>
+   348→          </div>
+   349→
+   350→          {/* Items builder */}
+   351→          <div className="space-y-2.5">
+   352→            <GroupLabel>Items</GroupLabel>
+   353→            <p className="-mt-1.5 text-caption text-muted-foreground">
+   354→              Prices pre-fill from the customer's negotiated pricing — edit any unit price to record what you actually
+   355→              agreed over email or the phone.
+   356→            </p>
+   357→            <Select value={NONE} onValueChange={(v) => v !== NONE && addProduct(v)}>
+   358→              <SelectTrigger className="h-9 w-full text-body-sm" aria-label="Add a product">
+   359→                <SelectValue placeholder="Add a product…" />
+   360→              </SelectTrigger>
+   361→              <SelectContent>
+   362→                <SelectItem value={NONE}>Add a product…</SelectItem>
+   363→                {Array.from(productsByCategory.entries()).map(([category, list]) => (
+   364→                  <SelectGroup key={category}>
+   365→                    <SelectLabel className="text-micro">{category}</SelectLabel>
+   366→                    {list.map((p) => (
+   367→                      <SelectItem key={p.id} value={p.id}>
+   368→                        {p.name}
+   369→                        <span className="ml-1.5 font-mono text-caption text-muted-foreground">{p.sku}</span>
+   370→                      </SelectItem>
+   371→                    ))}
+   372→                  </SelectGroup>
+   373→                ))}
+   374→              </SelectContent>
+   375→            </Select>
+   376→
+   377→            {lines.length === 0 ? (
+   378→              <p className="rounded-md border border-dashed bg-surface-sunken/60 px-4 py-5 text-center text-body-sm text-muted-foreground">
+   379→                No lines yet — pick products from the catalogue or add a custom line for anything unusual.
+   380→              </p>
+   381→            ) : (
+   382→              <ul className="divide-y overflow-hidden rounded-md border">
+   383→                {lines.map((line, i) => (
+   384→                  <li key={i} className="px-3.5 py-3">
+   385→                    {line.kind === "PRODUCT" ? (
+   386→                      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+   387→                        <div className="min-w-0 flex-1">
+   388→                          <p className="truncate text-body-sm font-medium">{line.name}</p>
+   389→                          <p className="font-mono text-caption text-muted-foreground">{line.sku}</p>
+   390→                        </div>
+   391→                        <QtyStepper
+   392→                          value={line.qty}
+   393→                          onChange={(q) =>
+   394→                            setLines((ls) => ls.map((l, idx) => (idx === i && l.kind === "PRODUCT" ? { ...l, qty: q } : l)))
+   395→                          }
+   396→                          min={1}
+   397→                          size="sm"
+   398→                          ariaLabel={`Quantity for ${line.name}`}
+   399→                        />
+   400→                        <div className="flex w-[104px] flex-col items-end gap-0.5">
+   401→                          <div className="relative">
+   402→                            <span
+   403→                              className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-caption text-muted-foreground"
+   404→                              aria-hidden
+   405→                            >
+   406→                              $
+   407→                            </span>
+   408→                            <Input
+   409→                              value={
+   410→                                line.priceInput !== null
+   411→                                  ? line.priceInput
+   412→                                  : unitPrice(line.productId) !== null
+   413→                                    ? centsToInputValue(unitPrice(line.productId) as number)
+   414→                                    : ""
+   415→                              }
+   416→                              onChange={(e) =>
+   417→                                setLines((ls) =>
+   418→                                  ls.map((l, idx) => (idx === i && l.kind === "PRODUCT" ? { ...l, priceInput: e.target.value } : l)),
+   419→                                )
+   420→                              }
+   421→                              placeholder={unitPrice(line.productId) === null ? "Agreed" : "0.00"}
+   422→                              className="h-8 w-[104px] pl-5 pr-2.5 text-right font-mono text-body-sm tnum focus:border-ring focus:ring-2 focus:ring-ring/50"
+   423→                              inputMode="decimal"
+   424→                              aria-label={`Unit price for ${line.name}`}
+   425→                              maxLength={12}
+   426→                            />
+   427→                          </div>
+   428→                          <p className="tnum text-body-sm font-medium">
+   429→                            {lineCents(line) === null ? (
+   430→                              <span className="text-caption font-normal text-muted-foreground">Total TBC</span>
+   431→                            ) : (
+   432→                              <Money cents={line.qty * (lineCents(line) as number)} />
+   433→                            )}
+   434→                          </p>
+   435→                        </div>
+   436→                        <Button
+   437→                          type="button"
+   438→                          variant="ghost"
+   439→                          size="icon"
+   440→                          className="size-7 text-muted-foreground hover:text-foreground"
+   441→                          aria-label={`Remove ${line.name}`}
+   442→                          onClick={() => setLines((ls) => ls.filter((_, idx) => idx !== i))}
+   443→                        >
+   444→                          <X className="size-3.5" aria-hidden />
+   445→                        </Button>
+   446→                      </div>
+   447→                    ) : (
+   448→                      <div className="space-y-2.5">
+   449→                        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+   450→                          <div className="min-w-0 flex-1 space-y-2">
+   451→                            <Input
+   452→                              value={line.name}
+   453→                              onChange={(e) =>
+   454→                                setLines((ls) =>
+   455→                                  ls.map((l, idx) => (idx === i && l.kind === "CUSTOM" ? { ...l, name: e.target.value } : l)),
+   456→                                )
+   457→                              }
+   458→                              placeholder="Custom line — e.g. Printed sleeve prototype"
+   459→                              className="h-8 text-body-sm"
+   460→                              aria-label="Custom line name"
+   461→                              maxLength={160}
+   462→                            />
+   463→                            <Input
+   464→                              value={line.description}
+   465→                              onChange={(e) =>
+   466→                                setLines((ls) =>
+   467→                                  ls.map((l, idx) =>
+   468→                                    idx === i && l.kind === "CUSTOM" ? { ...l, description: e.target.value } : l,
+   469→                                  ),
+   470→                                )
+   471→                              }
+   472→                              placeholder="Details / specification (optional)"
+   473→                              className="h-8 text-body-sm"
+   474→                              aria-label="Custom line description"
+   475→                              maxLength={400}
+   476→                            />
+   477→                          </div>
+   478→                          <QtyStepper
+   479→                            value={line.qty}
+   480→                            onChange={(q) =>
+   481→                              setLines((ls) => ls.map((l, idx) => (idx === i && l.kind === "CUSTOM" ? { ...l, qty: q } : l)))
+   482→                            }
+   483→                            min={1}
+   484→                            size="sm"
+   485→                            ariaLabel="Quantity for custom line"
+   486→                          />
+   487→                          <div className="flex w-[104px] flex-col items-end gap-0.5">
+   488→                            <div className="relative">
+   489→                              <span
+   490→                                className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-caption text-muted-foreground"
+   491→                                aria-hidden
+   492→                              >
+   493→                                $
+   494→                              </span>
+   495→                              <Input
+   496→                                value={line.priceInput ?? ""}
+   497→                                onChange={(e) =>
+   498→                                  setLines((ls) =>
+   499→                                    ls.map((l, idx) => (idx === i && l.kind === "CUSTOM" ? { ...l, priceInput: e.target.value } : l)),
+   500→                                  )
+   501→                                }
+   502→                                placeholder="TBC"
+   503→                                className="h-8 w-[104px] pl-5 pr-2.5 text-right font-mono text-body-sm tnum focus:border-ring focus:ring-2 focus:ring-ring/50"
+   504→                                inputMode="decimal"
+   505→                                aria-label={`Unit price for ${line.name || "custom line"}`}
+   506→                                maxLength={12}
+   507→                              />
+   508→                            </div>
+   509→                            <p className="tnum text-body-sm font-medium">
+   510→                              {lineCents(line) === null ? (
+   511→                                <span className="text-caption font-normal text-muted-foreground">Pricing TBC</span>
+   512→                              ) : (
+   513→                                <Money cents={line.qty * (lineCents(line) as number)} />
+   514→                              )}
+   515→                            </p>
+   516→                          </div>
+   517→                          <Button
+   518→                            type="button"
+   519→                            variant="ghost"
+   520→                            size="icon"
+   521→                            className="size-7 text-muted-foreground hover:text-foreground"
+   522→                            aria-label="Remove custom line"
+   523→                            onClick={() => setLines((ls) => ls.filter((_, idx) => idx !== i))}
+   524→                          >
+   525→                            <X className="size-3.5" aria-hidden />
+   526→                          </Button>
+   527→                        </div>
+   528→                      </div>
+   529→                    )}
+   530→                  </li>
+   531→                ))}
+   532→              </ul>
+   533→            )}
+   534→
+   535→            <Button
+   536→              type="button"
+   537→              variant="outline"
+   538→              size="sm"
+   539→              className="gap-1.5"
+   540→              onClick={() => setLines((ls) => [...ls, { kind: "CUSTOM", name: "", description: "", qty: 1, priceInput: null }])}
+   541→            >
+   542→              <Plus className="size-3.5" aria-hidden />
+   543→              Add custom line
+   544→            </Button>
+   545→
+   546→            {lines.length > 0 && (
+   547→              <div className="flex flex-col items-end gap-0.5 rounded-md border bg-secondary/50 px-3.5 py-2.5 text-body-sm">
+   548→                <div className="flex w-full items-baseline justify-between">
+   549→                  <span className="text-muted-foreground">Subtotal</span>
+   550→                  <Money cents={subtotalCents} className="font-medium" />
+   551→                </div>
+   552→                <div className="flex w-full items-baseline justify-between">
+   553→                  <span className="text-muted-foreground">
+   554→                    GST ({(DEFAULT_TAX_RATE_BP / 100).toFixed(1)}%, estimated)
+   555→                  </span>
+   556→                  <Money cents={taxCents} />
+   557→                </div>
+   558→                <div className="flex w-full items-baseline justify-between border-t pt-1">
+   559→                  <span className="font-medium">Estimated total</span>
+   560→                  <Money cents={subtotalCents + taxCents} className="font-semibold" />
+   561→                </div>
+   562→                {unpricedCount > 0 && (
+   563→                  <p className="mt-0.5 self-end text-caption text-muted-foreground">
+   564→                    {unpricedCount} line{unpricedCount === 1 ? "" : "s"} not yet priced — excluded from the estimate.
+   565→                  </p>
+   566→                )}
+   567→              </div>
+   568→            )}
+   569→          </div>
+   570→
+   571→          {/* Delivery */}
+   572→          <div className="space-y-2.5">
+   573→            <GroupLabel>Delivery &amp; reference</GroupLabel>
+   574→            <div className="grid gap-3.5 sm:grid-cols-2">
+   575→              <div className="space-y-1.5 sm:col-span-2">
+   576→                <Label htmlFor="rec-address" className="text-body-sm">
+   577→                  Ship to
+   578→                </Label>
+   579→                <Select value={addressId} onValueChange={setAddressId} disabled={orgId === ""}>
+   580→                  <SelectTrigger id="rec-address" className="h-9 w-full text-body-sm" aria-label="Shipping address">
+   581→                    <SelectValue placeholder={orgId === "" ? "Choose a customer first…" : "Choose an approved address…"} />
+   582→                  </SelectTrigger>
+   583→                  <SelectContent>
+   584→                    {approvedAddresses.length === 0 ? (
+   585→                      <SelectItem value={NONE} disabled>
+   586→                        No approved addresses yet
+   587→                      </SelectItem>
+   588→                    ) : (
+   589→                      approvedAddresses.map((a) => (
+   590→                        <SelectItem key={a.id} value={a.id}>
+   591→                          {a.label} — {a.city}, {a.province}
+   592→                        </SelectItem>
+   593→                      ))
+   594→                    )}
+   595→                  </SelectContent>
+   596→                </Select>
+   597→                {orgId !== "" && approvedAddresses.length === 0 && (
+   598→                  <p className="text-caption text-muted-foreground">
+   599→                    Approve one of their saved addresses from the customer profile, or leave this unset.
+   600→                  </p>
+   601→                )}
+   602→              </div>
+   603→              <div className="space-y-1.5">
+   604→                <Label htmlFor="rec-po" className="text-body-sm">
+   605→                  PO number <span className="text-muted-foreground">(optional)</span>
+   606→                </Label>
+   607→                <Input
+   608→                  id="rec-po"
+   609→                  value={poNumber}
+   610→                  onChange={(e) => setPoNumber(e.target.value)}
+   611→                  placeholder="Customer PO reference"
+   612→                  className="h-9 text-body-sm"
+   613→                  maxLength={60}
+   614→                />
+   615→              </div>
+   616→              <div className="space-y-1.5">
+   617→                <Label htmlFor="rec-tracking" className="text-body-sm">
+   618→                  Tracking <span className="text-muted-foreground">(optional)</span>
+   619→                </Label>
+   620→                <Input
+   621→                  id="rec-tracking"
+   622→                  value={tracking}
+   623→                  onChange={(e) => setTracking(e.target.value)}
+   624→                  placeholder="If already dispatched"
+   625→                  className="h-9 font-mono text-body-sm"
+   626→                  maxLength={80}
+   627→                />
+   628→              </div>
+   629→              <div className="space-y-1.5">
+   630→                <Label htmlFor="rec-requested" className="text-body-sm">
+   631→                  Requested delivery
+   632→                </Label>
+   633→                <Input
+   634→                  id="rec-requested"
+   635→                  type="date"
+   636→                  value={requestedDeliveryDate}
+   637→                  onChange={(e) => setRequestedDeliveryDate(e.target.value)}
+   638→                  className="h-9 text-body-sm"
+   639→                />
+   640→              </div>
+   641→              <div className="space-y-1.5">
+   642→                <Label htmlFor="rec-est-delivery" className="text-body-sm">
+   643→                  Estimated delivery
+   644→                </Label>
+   645→                <Input
+   646→                  id="rec-est-delivery"
+   647→                  type="date"
+   648→                  value={estimatedDelivery}
+   649→                  onChange={(e) => setEstimatedDelivery(e.target.value)}
+   650→                  className="h-9 text-body-sm"
+   651→                />
+   652→              </div>
+   653→              <div className="space-y-1.5">
+   654→                <Label htmlFor="rec-est-dispatch" className="text-body-sm">
+   655→                  Estimated dispatch
+   656→                </Label>
+   657→                <Input
+   658→                  id="rec-est-dispatch"
+   659→                  type="date"
+   660→                  value={estimatedDispatch}
+   661→                  onChange={(e) => setEstimatedDispatch(e.target.value)}
+   662→                  className="h-9 text-body-sm"
+   663→                />
+   664→              </div>
+   665→              <div className="space-y-1.5 sm:col-span-2">
+   666→                <Label htmlFor="rec-notes" className="text-body-sm">
+   667→                  Notes <span className="text-muted-foreground">(shared with the customer)</span>
+   668→                </Label>
+   669→                <Textarea
+   670→                  id="rec-notes"
+   671→                  rows={3}
+   672→                  value={notes}
+   673→                  onChange={(e) => setNotes(e.target.value)}
+   674→                  placeholder="Instructions from the email or call — delivery windows, contacts on site…"
+   675→                  className="leading-relaxed"
+   676→                  maxLength={1000}
+   677→                />
+   678→              </div>
+   679→            </div>
+   680→          </div>
+   681→
+   682→          {/* Notify */}
+   683→          <div className="flex items-start justify-between gap-3 rounded-md border bg-secondary/50 px-3.5 py-3">
+   684→            <div className="min-w-0">
+   685→              <Label htmlFor="rec-notify" className="text-body-sm font-medium">
+   686→                Notify the customer organization
+   687→              </Label>
+   688→              <p className="mt-0.5 text-caption leading-snug text-muted-foreground">
+   689→                A notification lands in their portal — the order appears as their own either way.
+   690→              </p>
+   691→            </div>
+   692→            <Switch
+   693→              id="rec-notify"
+   694→              checked={notifyCustomer}
+   695→              onCheckedChange={setNotifyCustomer}
+   696→              aria-label="Notify the customer organization"
+   697→            />
+   698→          </div>
+   699→
+   700→          {submitError && <FieldError>{submitError}</FieldError>}
+   701→
+   702→          <DialogFooter className="border-t pt-4">
+   703→            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
+   704→              Cancel
+   705→            </Button>
+   706→            <Button type="submit" className="gap-1.5" disabled={create.isPending}>
+   707→              {create.isPending ? (
+   708→                <ClipboardCheck className="size-4 animate-pulse" aria-hidden />
+   709→              ) : (
+   710→                <ClipboardCheck className="size-4" aria-hidden />
+   711→              )}
+   712→              {create.isPending ? "Recording…" : "Record order"}
+   713→            </Button>
+   714→          </DialogFooter>
+   715→        </form>
+   716→      </DialogContent>
+   717→    </Dialog>
+   718→  );
+   719→}
+   720→
